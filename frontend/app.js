@@ -257,7 +257,7 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
     }
 });
 
-let globalCsvData =[];
+let globalBatchResults = []; // Stores all row data for dynamic toggling
 
 document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -267,53 +267,132 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     const table = document.getElementById("bulk-table");
     const tbody = table.querySelector("tbody");
     const chartsContainer = document.getElementById("histograms-container");
+    const downloadBtn = document.getElementById("download-csv-btn");
 
     tbody.innerHTML = "";
     chartsContainer.innerHTML = "";
     table.style.display = "table";
     document.getElementById("bulk-section").classList.add("bulk-card");
-    const downloadBtn = document.getElementById("download-csv-btn");
     downloadBtn.style.display = "none";
 
-    // Initialize CSV with Headers
-    globalCsvData = [[
-        "Filename", "R² Rind", "R² Flesh", "Width Raw (cm)", "Width Sm (cm)", 
-        "Height Raw (cm)", "Height Sm (cm)", "Perim Raw (cm)", "Perim Sm (cm)", 
-        "F.Width Raw (cm)", "F.Width Sm (cm)", "F.Height Raw (cm)", "F.Height Sm (cm)", 
-        "F.Perim Raw (cm)", "F.Perim Sm (cm)", "RindThk Raw (cm)", "RindThk Sm (cm)", 
-        "RindRatio Raw", "RindRatio Sm", "Area Raw (cm²)", "Area Sm (cm²)", 
-        "F.Area Raw (cm²)", "F.Area Sm (cm²)", "F.Ratio Raw", "F.Ratio Sm", 
-        "Elong Raw", "Elong Sm", "Asym Raw", "Asym Sm", "F.Asym Raw", "F.Asym Sm", 
-        "Circ Raw", "Circ Sm", "Midline Curve", "Init ΔE", "Final ΔE", "Time (ms)"
-    ].join(",")];
+    // Reset global state
+    globalBatchResults = [];
+    let completed = 0, successCount = 0, failureCount = 0, pixelScaleCount = 0;
 
-    let completed = 0;
-    let successCount = 0;
-    let failureCount = 0;
-    let pixelScaleCount = 0;
+    for (let i = 0; i < files.length; i++) {
+        status.innerText = `Processing image ${i + 1} of ${files.length}...`;
 
-    // --- Timer Initialization ---
-    const timerDiv = document.getElementById("batch-timer");
-    timerDiv.style.display = "block";
-    timerDiv.innerText = "Elapsed: 00:00 | ETA: Calculating...";
-    const batchStartTime = Date.now();
-    let timerInterval = setInterval(() => {
-        const elapsedSec = Math.floor((Date.now() - batchStartTime) / 1000);
-        const m = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
-        const s = String(elapsedSec % 60).padStart(2, '0');
+        try {
+            const data = await postBulkImage(files[i], includeImages);
+            const tr = document.createElement("tr");
+
+            if (data.success) {
+                successCount++;
+                const isCm = measurementUnit(data) === "cm";
+                const digits = isCm ? 1 : 0;
+                const notes = rowNotes(data);
+                if (!isCm) pixelScaleCount++;
+
+                // Store raw data in global array (Default to included: true)
+                globalBatchResults.push({ file_name: files[i].name, data: data, included: true, isCm: isCm, digits: digits, notes: notes });
+                const idx = globalBatchResults.length - 1;
+
+                let rw=isCm?data.raw_width:null, sw=isCm?data.sm_width:null;
+                let rh=isCm?data.raw_height:null, sh=isCm?data.sm_height:null;
+                let rp=isCm?data.raw_perimeter:null, sp=isCm?data.sm_perimeter:null;
+                let rfw=isCm?data.raw_flesh_width:null, sfw=isCm?data.sm_flesh_width:null;
+                let rfh=isCm?data.raw_flesh_height:null, sfh=isCm?data.sm_flesh_height:null;
+                let rfp=isCm?data.raw_flesh_perimeter:null, sfp=isCm?data.sm_flesh_perimeter:null;
+                let rrt=isCm?data.raw_rind_thick:null, srt=isCm?data.sm_rind_thick:null;
+                let ra=isCm?data.raw_total_area:null, sa=isCm?data.sm_total_area:null;
+                let rfa=isCm?data.raw_flesh_area:null, sfa=isCm?data.sm_flesh_area:null;
+
+                tr.innerHTML = `
+                    <td><input type="checkbox" checked class="toggle-checkbox" data-idx="${idx}"></td>
+                    <td>${escapeHtml(data.filename || files[i].name)}
+                        ${notes ? `<span title="${escapeHtml(notes)}" style="display:inline-block; width:18px; height:18px; background:#ffc107; color:#000; border-radius:50%; text-align:center; line-height:18px; font-weight:bold; cursor:help; margin-left:5px; font-size:12px;">!</span>` : ""}
+                    </td>
+                    <td>${fmt(data.r2_rind, 4)}</td>
+                    <td>${fmt(data.r2_flesh, 4)}</td>
+                    <td>${fmt(rw, digits)}</td><td>${fmt(sw, digits)}</td>
+                    <td>${fmt(rh, digits)}</td><td>${fmt(sh, digits)}</td>
+                    <td>${fmt(rp, digits)}</td><td>${fmt(sp, digits)}</td>
+                    <td>${fmt(rfw, digits)}</td><td>${fmt(sfw, digits)}</td>
+                    <td>${fmt(rfh, digits)}</td><td>${fmt(sfh, digits)}</td>
+                    <td>${fmt(rfp, digits)}</td><td>${fmt(sfp, digits)}</td>
+                    <td>${fmt(rrt, digits)}</td><td>${fmt(srt, digits)}</td>
+                    <td>${fmt(data.raw_rind_ratio, 3)}</td><td>${fmt(data.sm_rind_ratio, 3)}</td>
+                    <td>${fmt(ra, digits)}</td><td>${fmt(sa, digits)}</td>
+                    <td>${fmt(rfa, digits)}</td><td>${fmt(sfa, digits)}</td>
+                    <td>${fmt(data.raw_flesh_ratio, 3)}</td><td>${fmt(data.sm_flesh_ratio, 3)}</td>
+                    <td>${fmt(data.raw_elongation, 3)}</td><td>${fmt(data.sm_elongation, 3)}</td>
+                    <td>${fmt(data.raw_asym, 3)}</td><td>${fmt(data.sm_asym, 3)}</td>
+                    <td>${fmt(data.raw_flesh_asym, 3)}</td><td>${fmt(data.sm_flesh_asym, 3)}</td>
+                    <td>${fmt(data.raw_circ, 3)}</td><td>${fmt(data.sm_circ, 3)}</td>
+                    <td>${fmt(data.midline_curvature, 4)}</td>
+                    <td>${fmt(data.delta_e_initial, 2)}</td><td>${fmt(data.delta_e_final, 2)}</td>
+                    <td>${isNumber(data.processing_ms) ? data.processing_ms : "N/A"}</td>
+                    <td>${data.image_raw_base64 ? `<img src="data:image/jpeg;base64,${data.image_raw_base64}" class="thumb preview-img">` : `<span class="muted">-</span>`}</td>
+                    <td>${data.image_sm_base64 ? `<img src="data:image/jpeg;base64,${data.image_sm_base64}" class="thumb preview-img">` : `<span class="muted">-</span>`}</td>
+                `;
+            } else {
+                failureCount++;
+                tr.innerHTML = `<td>-</td><td>${escapeHtml(files[i].name)}</td><td colspan="36" style="color:red;">Error: ${escapeHtml(data.message)}</td>`;
+            }
+            tbody.appendChild(tr);
+        } catch (err) {
+            failureCount++;
+            const tr = document.createElement("tr");
+            const msg = err.message === BULK_TIMEOUT_MESSAGE ? BULK_TIMEOUT_MESSAGE : `API Error: ${err.message}`;
+            tr.innerHTML = `<td>-</td><td>${escapeHtml(files[i].name)}</td><td colspan="36" style="color:red;">${escapeHtml(msg)}</td>`;
+            tbody.appendChild(tr);
+        }
+
+        completed++;
+        if (i < files.length - 1) await new Promise(r => setTimeout(r, 500));
+    }
+
+    clearInterval(timerInterval);
+    const finalElapsed = Math.floor((Date.now() - batchStartTime) / 1000);
+    const fm = String(Math.floor(finalElapsed / 60)).padStart(2, '0');
+    const fs = String(finalElapsed % 60).padStart(2, '0');
+    timerDiv.innerText = `Total Time: ${fm}:${fs}`;
+
+    const excludedText = pixelScaleCount > 0 ? ` ${pixelScaleCount} pixel-scale row(s) ignored for spatial metrics.` : "";
+    status.innerText = `Batch complete: ${successCount} succeeded, ${failureCount} failed, ${completed} attempted.${excludedText}`;
+
+    if (typeof gtag === 'function') {
+        gtag('event', 'processed_bulk_batch', { 'event_category': 'Phenotyping', 'images_attempted': completed, 'images_succeeded': successCount });
+    }
+    
+    if (successCount > 0) {
+        downloadBtn.style.display = "inline-block";
+        rebuildHistograms(chartsContainer);
+    }
+});
+
+// --- ROW TOGGLE LISTENER ---
+// Listen to the table body. If a checkbox is clicked, update state and instantly rebuild histograms.
+document.querySelector("#bulk-table tbody").addEventListener("change", (e) => {
+    if (e.target.classList.contains("toggle-checkbox")) {
+        const idx = e.target.getAttribute("data-idx");
+        const tr = e.target.closest("tr");
         
-        let etaStr = "Calculating...";
-        if (completed > 0 && completed < files.length) {
-            const timePerImg = elapsedSec / completed;
-            const remainingSec = Math.floor(timePerImg * (files.length - completed));
-            const rm = String(Math.floor(remainingSec / 60)).padStart(2, '0');
-            const rs = String(remainingSec % 60).padStart(2, '0');
-            etaStr = `${rm}:${rs}`;
+        globalBatchResults[idx].included = e.target.checked;
+        if (e.target.checked) {
+            tr.classList.remove("excluded-row");
+        } else {
+            tr.classList.add("excluded-row");
         }
         
-        timerDiv.innerText = `Elapsed: ${m}:${s} | ETA: ${etaStr}`;
-    }, 1000);
-    // ---------------------------------
+        // Dynamically update the charts
+        rebuildHistograms(document.getElementById("histograms-container"));
+    }
+});
+
+// --- DYNAMIC HISTOGRAM BUILDER ---
+function rebuildHistograms(container) {
+    container.innerHTML = ""; // Clear old charts
     
     const batchData = {
         "Width - Raw (cm)":[], "Width - Sm (cm)": [],
@@ -332,193 +411,65 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
         "Flesh Asym - Raw": [], "Flesh Asym - Sm":[],
         "Circularity - Raw": [], "Circularity - Sm": [],
         "Midline Curve": [], "R² Rind":[], "R² Flesh": [],
-        "Initial ΔE": [], "Final ΔE":[]
+        "Initial ΔE": [], "Final ΔE":[], "Time (ms)": [] // <--- Time added here!
     };
 
-    for (let i = 0; i < files.length; i++) {
-        status.innerText = `Processing image ${i + 1} of ${files.length}...`;
+    // Only pull data from rows that are checked (included: true)
+    globalBatchResults.forEach(item => {
+        if (!item.included || !item.data.success) return;
+        const d = item.data;
+        const isCm = item.isCm;
 
-        try {
-            const data = await postBulkImage(files[i], includeImages);
-            const tr = document.createElement("tr");
+        let rw=isCm?d.raw_width:null, sw=isCm?d.sm_width:null;
+        let rh=isCm?d.raw_height:null, sh=isCm?d.sm_height:null;
+        let rp=isCm?d.raw_perimeter:null, sp=isCm?d.sm_perimeter:null;
+        let rfw=isCm?d.raw_flesh_width:null, sfw=isCm?d.sm_flesh_width:null;
+        let rfh=isCm?d.raw_flesh_height:null, sfh=isCm?d.sm_flesh_height:null;
+        let rfp=isCm?d.raw_flesh_perimeter:null, sfp=isCm?d.sm_flesh_perimeter:null;
+        let rrt=isCm?d.raw_rind_thick:null, srt=isCm?d.sm_rind_thick:null;
+        let ra=isCm?d.raw_total_area:null, sa=isCm?d.sm_total_area:null;
+        let rfa=isCm?d.raw_flesh_area:null, sfa=isCm?d.sm_flesh_area:null;
 
-            if (data.success) {
-                successCount++;
-                const isCm = measurementUnit(data) === "cm";
-                const digits = isCm ? 2 : 0;
-                const notes = rowNotes(data);
+        if(isNumber(rw)) batchData["Width - Raw (cm)"].push(rw);
+        if(isNumber(sw)) batchData["Width - Sm (cm)"].push(sw);
+        if(isNumber(rh)) batchData["Height - Raw (cm)"].push(rh);
+        if(isNumber(sh)) batchData["Height - Sm (cm)"].push(sh);
+        if(isNumber(rp)) batchData["Perim - Raw (cm)"].push(rp);
+        if(isNumber(sp)) batchData["Perim - Sm (cm)"].push(sp);
+        if(isNumber(rfw)) batchData["F.Width - Raw (cm)"].push(rfw);
+        if(isNumber(sfw)) batchData["F.Width - Sm (cm)"].push(sfw);
+        if(isNumber(rfh)) batchData["F.Height - Raw (cm)"].push(rfh);
+        if(isNumber(sfh)) batchData["F.Height - Sm (cm)"].push(sfh);
+        if(isNumber(rfp)) batchData["F.Perim - Raw (cm)"].push(rfp);
+        if(isNumber(sfp)) batchData["F.Perim - Sm (cm)"].push(sfp);
+        if(isNumber(rrt)) batchData["Rind Thick - Raw (cm)"].push(rrt);
+        if(isNumber(srt)) batchData["Rind Thick - Sm (cm)"].push(srt);
+        if(isNumber(d.raw_rind_ratio)) batchData["Rind Ratio - Raw"].push(d.raw_rind_ratio);
+        if(isNumber(d.sm_rind_ratio)) batchData["Rind Ratio - Sm"].push(d.sm_rind_ratio);
+        if(isNumber(ra)) batchData["Total Area - Raw (cm²)"].push(ra);
+        if(isNumber(sa)) batchData["Total Area - Sm (cm²)"].push(sa);
+        if(isNumber(rfa)) batchData["Flesh Area - Raw (cm²)"].push(rfa);
+        if(isNumber(sfa)) batchData["Flesh Area - Sm (cm²)"].push(sfa);
+        if(isNumber(d.raw_flesh_ratio)) batchData["Flesh Ratio - Raw"].push(d.raw_flesh_ratio);
+        if(isNumber(d.sm_flesh_ratio)) batchData["Flesh Ratio - Sm"].push(d.sm_flesh_ratio);
+        if(isNumber(d.raw_elongation)) batchData["Elongation - Raw"].push(d.raw_elongation);
+        if(isNumber(d.sm_elongation)) batchData["Elongation - Sm"].push(d.sm_elongation);
+        if(isNumber(d.raw_asym)) batchData["Asymmetry - Raw"].push(d.raw_asym);
+        if(isNumber(d.sm_asym)) batchData["Asymmetry - Sm"].push(d.sm_asym);
+        if(isNumber(d.raw_flesh_asym)) batchData["Flesh Asym - Raw"].push(d.raw_flesh_asym);
+        if(isNumber(d.sm_flesh_asym)) batchData["Flesh Asym - Sm"].push(d.sm_flesh_asym);
+        if(isNumber(d.raw_circ)) batchData["Circularity - Raw"].push(d.raw_circ);
+        if(isNumber(d.sm_circ)) batchData["Circularity - Sm"].push(d.sm_circ);
+        if(isNumber(d.midline_curvature)) batchData["Midline Curve"].push(d.midline_curvature);
+        if(isNumber(d.r2_rind)) batchData["R² Rind"].push(d.r2_rind);
+        if(isNumber(d.r2_flesh)) batchData["R² Flesh"].push(d.r2_flesh);
+        if(isNumber(d.delta_e_initial)) batchData["Initial ΔE"].push(d.delta_e_initial);
+        if(isNumber(d.delta_e_final)) batchData["Final ΔE"].push(d.delta_e_final);
+        if(isNumber(d.processing_ms)) batchData["Time (ms)"].push(d.processing_ms);
+    });
 
-                // Enforce N/A for physical dimensions if ColorChecker failed
-                let rw=isCm?data.raw_width:null, sw=isCm?data.sm_width:null;
-                let rh=isCm?data.raw_height:null, sh=isCm?data.sm_height:null;
-                let rp=isCm?data.raw_perimeter:null, sp=isCm?data.sm_perimeter:null;
-                let rfw=isCm?data.raw_flesh_width:null, sfw=isCm?data.sm_flesh_width:null;
-                let rfh=isCm?data.raw_flesh_height:null, sfh=isCm?data.sm_flesh_height:null;
-                let rfp=isCm?data.raw_flesh_perimeter:null, sfp=isCm?data.sm_flesh_perimeter:null;
-                let rrt=isCm?data.raw_rind_thick:null, srt=isCm?data.sm_rind_thick:null;
-                let ra=isCm?data.raw_total_area:null, sa=isCm?data.sm_total_area:null;
-                let rfa=isCm?data.raw_flesh_area:null, sfa=isCm?data.sm_flesh_area:null;
-                if (!isCm) pixelScaleCount++;
-
-                // Collect Histograms
-                if(isNumber(rw)) batchData["Width - Raw (cm)"].push(rw);
-                if(isNumber(sw)) batchData["Width - Sm (cm)"].push(sw);
-                if(isNumber(rh)) batchData["Height - Raw (cm)"].push(rh);
-                if(isNumber(sh)) batchData["Height - Sm (cm)"].push(sh);
-                if(isNumber(rp)) batchData["Perim - Raw (cm)"].push(rp);
-                if(isNumber(sp)) batchData["Perim - Sm (cm)"].push(sp);
-                if(isNumber(rfw)) batchData["F.Width - Raw (cm)"].push(rfw);
-                if(isNumber(sfw)) batchData["F.Width - Sm (cm)"].push(sfw);
-                if(isNumber(rfh)) batchData["F.Height - Raw (cm)"].push(rfh);
-                if(isNumber(sfh)) batchData["F.Height - Sm (cm)"].push(sfh);
-                if(isNumber(rfp)) batchData["F.Perim - Raw (cm)"].push(rfp);
-                if(isNumber(sfp)) batchData["F.Perim - Sm (cm)"].push(sfp);
-                if(isNumber(rrt)) batchData["Rind Thick - Raw (cm)"].push(rrt);
-                if(isNumber(srt)) batchData["Rind Thick - Sm (cm)"].push(srt);
-                if(isNumber(data.raw_rind_ratio)) batchData["Rind Ratio - Raw"].push(data.raw_rind_ratio);
-                if(isNumber(data.sm_rind_ratio)) batchData["Rind Ratio - Sm"].push(data.sm_rind_ratio);
-                if(isNumber(ra)) batchData["Total Area - Raw (cm²)"].push(ra);
-                if(isNumber(sa)) batchData["Total Area - Sm (cm²)"].push(sa);
-                if(isNumber(rfa)) batchData["Flesh Area - Raw (cm²)"].push(rfa);
-                if(isNumber(sfa)) batchData["Flesh Area - Sm (cm²)"].push(sfa);
-                if(isNumber(data.raw_flesh_ratio)) batchData["Flesh Ratio - Raw"].push(data.raw_flesh_ratio);
-                if(isNumber(data.sm_flesh_ratio)) batchData["Flesh Ratio - Sm"].push(data.sm_flesh_ratio);
-                if(isNumber(data.raw_elongation)) batchData["Elongation - Raw"].push(data.raw_elongation);
-                if(isNumber(data.sm_elongation)) batchData["Elongation - Sm"].push(data.sm_elongation);
-                if(isNumber(data.raw_asym)) batchData["Asymmetry - Raw"].push(data.raw_asym);
-                if(isNumber(data.sm_asym)) batchData["Asymmetry - Sm"].push(data.sm_asym);
-                if(isNumber(data.raw_flesh_asym)) batchData["Flesh Asym - Raw"].push(data.raw_flesh_asym);
-                if(isNumber(data.sm_flesh_asym)) batchData["Flesh Asym - Sm"].push(data.sm_flesh_asym);
-                if(isNumber(data.raw_circ)) batchData["Circularity - Raw"].push(data.raw_circ);
-                if(isNumber(data.sm_circ)) batchData["Circularity - Sm"].push(data.sm_circ);
-                if(isNumber(data.midline_curvature)) batchData["Midline Curve"].push(data.midline_curvature);
-                if(isNumber(data.r2_rind)) batchData["R² Rind"].push(data.r2_rind);
-                if(isNumber(data.r2_flesh)) batchData["R² Flesh"].push(data.r2_flesh);
-                if(isNumber(data.delta_e_initial)) batchData["Initial ΔE"].push(data.delta_e_initial);
-                if(isNumber(data.delta_e_final)) batchData["Final ΔE"].push(data.delta_e_final);
-
-                // HTML Row
-                tr.innerHTML = `
-                    <td>${escapeHtml(data.filename || files[i].name)}
-                        ${notes ? `<span title="${escapeHtml(notes)}" style="display:inline-block; width:18px; height:18px; background:#ffc107; color:#000; border-radius:50%; text-align:center; line-height:18px; font-weight:bold; cursor:help; margin-left:5px; font-size:12px;">!</span>` : ""}
-                    </td>
-                    <td>${fmt(data.r2_rind, 4)}</td>
-                    <td>${fmt(data.r2_flesh, 4)}</td>
-                    <td>${fmt(rw, digits)}</td>
-                    <td>${fmt(sw, digits)}</td>
-                    <td>${fmt(rh, digits)}</td>
-                    <td>${fmt(sh, digits)}</td>
-                    <td>${fmt(rp, digits)}</td>
-                    <td>${fmt(sp, digits)}</td>
-                    <td>${fmt(rfw, digits)}</td>
-                    <td>${fmt(sfw, digits)}</td>
-                    <td>${fmt(rfh, digits)}</td>
-                    <td>${fmt(sfh, digits)}</td>
-                    <td>${fmt(rfp, digits)}</td>
-                    <td>${fmt(sfp, digits)}</td>
-                    <td>${fmt(rrt, digits)}</td>
-                    <td>${fmt(srt, digits)}</td>
-                    <td>${fmt(data.raw_rind_ratio, 3)}</td>
-                    <td>${fmt(data.sm_rind_ratio, 3)}</td>
-                    <td>${fmt(ra, digits)}</td>
-                    <td>${fmt(sa, digits)}</td>
-                    <td>${fmt(rfa, digits)}</td>
-                    <td>${fmt(sfa, digits)}</td>
-                    <td>${fmt(data.raw_flesh_ratio, 3)}</td>
-                    <td>${fmt(data.sm_flesh_ratio, 3)}</td>
-                    <td>${fmt(data.raw_elongation, 3)}</td>
-                    <td>${fmt(data.sm_elongation, 3)}</td>
-                    <td>${fmt(data.raw_asym, 3)}</td>
-                    <td>${fmt(data.sm_asym, 3)}</td>
-                    <td>${fmt(data.raw_flesh_asym, 3)}</td>
-                    <td>${fmt(data.sm_flesh_asym, 3)}</td>
-                    <td>${fmt(data.raw_circ, 3)}</td>
-                    <td>${fmt(data.sm_circ, 3)}</td>
-                    <td>${fmt(data.midline_curvature, 4)}</td>
-                    <td>${fmt(data.delta_e_initial, 2)}</td>
-                    <td>${fmt(data.delta_e_final, 2)}</td>
-                    <td>${isNumber(data.processing_ms) ? data.processing_ms : "N/A"}</td>
-                    <td>${data.image_raw_base64 ? `<img src="data:image/jpeg;base64,${data.image_raw_base64}" class="thumb preview-img">` : `<span class="muted">-</span>`}</td>
-                    <td>${data.image_sm_base64 ? `<img src="data:image/jpeg;base64,${data.image_sm_base64}" class="thumb preview-img">` : `<span class="muted">-</span>`}</td>
-                `;
-
-                // CSV
-                const csvRow = [
-                    `"${data.filename || files[i].name}"`,
-                    fmt(data.r2_rind, 4), fmt(data.r2_flesh, 4),
-                    fmt(rw, digits), fmt(sw, digits),
-                    fmt(rh, digits), fmt(sh, digits),
-                    fmt(rp, digits), fmt(sp, digits),
-                    fmt(rfw, digits), fmt(sfw, digits),
-                    fmt(rfh, digits), fmt(sfh, digits),
-                    fmt(rfp, digits), fmt(sfp, digits),
-                    fmt(rrt, digits), fmt(srt, digits),
-                    fmt(data.raw_rind_ratio, 3), fmt(data.sm_rind_ratio, 3),
-                    fmt(ra, digits), fmt(sa, digits),
-                    fmt(rfa, digits), fmt(sfa, digits),
-                    fmt(data.raw_flesh_ratio, 3), fmt(data.sm_flesh_ratio, 3),
-                    fmt(data.raw_elongation, 3), fmt(data.sm_elongation, 3),
-                    fmt(data.raw_asym, 3), fmt(data.sm_asym, 3),
-                    fmt(data.raw_flesh_asym, 3), fmt(data.sm_flesh_asym, 3),
-                    fmt(data.raw_circ, 3), fmt(data.sm_circ, 3),
-                    fmt(data.midline_curvature, 4),
-                    fmt(data.delta_e_initial, 2), fmt(data.delta_e_final, 2),
-                    isNumber(data.processing_ms) ? data.processing_ms : "N/A"
-                ];
-                globalCsvData.push(csvRow.join(","));
-                // --- Track each individual image from the batch in Google Analytics ---
-                if (typeof gtag === 'function') {
-                    gtag('event', 'processed_single_image', {
-                        'event_category': 'Phenotyping',
-                        'success': true,
-                        'is_bulk': true,
-                        'username': currentUsername
-                    });
-                }
-            } else {
-                failureCount++;
-                tr.innerHTML = `<td>${escapeHtml(files[i].name)}</td><td colspan="38" style="color:red;">Error: ${escapeHtml(data.message)}</td>`;
-            }
-            tbody.appendChild(tr);
-        } catch (err) {
-            failureCount++;
-            const tr = document.createElement("tr");
-            const message = err.message === BULK_TIMEOUT_MESSAGE ? BULK_TIMEOUT_MESSAGE : `Network/API Error: ${err.message}`;
-            tr.innerHTML = `<td>${escapeHtml(files[i].name)}</td><td colspan="38" style="color:red;">${escapeHtml(message)}</td>`;
-            tbody.appendChild(tr);
-        }
-
-        completed++;
-        
-        // THE FIX: Cool-down period between requests to prevent overwhelming the proxy
-        if (i < files.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-    }
-
-    // --- Stop the Timer ---
-    clearInterval(timerInterval);
-    const finalElapsed = Math.floor((Date.now() - batchStartTime) / 1000);
-    const fm = String(Math.floor(finalElapsed / 60)).padStart(2, '0');
-    const fs = String(finalElapsed % 60).padStart(2, '0');
-    timerDiv.innerText = `Total Time: ${fm}:${fs}`;
-    // ---------------------------
-    
-    const excludedText = pixelScaleCount > 0 ? ` ${pixelScaleCount} pixel-scale row(s) ignored for spatial metrics.` : "";
-    status.innerText = `Batch complete: ${successCount} succeeded, ${failureCount} failed, ${completed} attempted.${excludedText}`;
-
-    // Send event to Google Analytics
-    if (typeof gtag === 'function') {
-        gtag('event', 'processed_bulk_batch', {
-            'event_category': 'Phenotyping',
-            'images_attempted': completed,
-            'images_succeeded': successCount
-        });
-    }
-    
-    if (successCount > 0) downloadBtn.style.display = "inline-block";
-    drawHistograms(batchData, chartsContainer);
-});
+    drawHistograms(batchData, container);
+}
 
 function drawHistograms(batchData, container) {
     const deKeys = ["Initial ΔE", "Final ΔE"];

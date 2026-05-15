@@ -39,6 +39,9 @@
     .lightbox-content { max-width: 90%; max-height: 90%; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
     .lightbox-close { position: absolute; top: 20px; right: 30px; color: white; font-size: 40px; font-weight: bold; cursor: pointer; user-select: none; }
     .lightbox-close:hover { color: #ddd; }
+    tr.excluded-row td { background-color: #ffe6e6; color: #999; text-decoration: line-through; }
+    tr.excluded-row img { filter: grayscale(100%) opacity(0.5); }
+    .toggle-checkbox { cursor: pointer; transform: scale(1.2); }
   </style>
 </head>
 <body>
@@ -95,6 +98,7 @@
         <table id="bulk-table" style="display: none;">
           <thead>
             <tr>
+              <th>Include</th>
               <th>Filename</th>
               <th>R² Rind</th>
               <th>R² Flesh</th>
