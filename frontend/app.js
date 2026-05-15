@@ -22,19 +22,16 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     const uname = document.getElementById("login-name").value.trim();
     const errorDiv = document.getElementById("login-error");
     
-    if (hash === TARGET_HASH) {
+    if (await sha256(pwd) === TARGET_HASH) {
         currentPassword = pwd;
         currentUsername = uname;
-            
-        // --- NEW ROUTING LOGIC ---
         if (currentUsername.toLowerCase() === 'devtest') {
             API_URL = "https://crabbly-watermelon-dev.hf.space/process_single";
             console.log("Routed to Experimental Server");
         } else {
             API_URL = "https://crabbly-watermelonphenotyping.hf.space/process_single";
+            console.log("Routed to Production Server");
         }
-        // -------------------------
-
         document.getElementById("login-view").style.display = "none";
         document.getElementById("app-view").style.display = "block";
 
