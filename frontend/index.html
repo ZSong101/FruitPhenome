@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phenotyping</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-L1Z92WM3GM"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  
+    gtag('config', 'G-L1Z92WM3GM');
+  </script>
+
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <style>
+    table { width: max-content; min-width: 100%; border-collapse: collapse; margin: 0 auto; font-size: 14px;}
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; white-space: nowrap; }
+    th { background-color: #f4f4f4; }
+    td.notes-cell { white-space: normal; min-width: 220px; max-width: 360px; text-align: left; line-height: 1.35; }
+    img.thumb { max-width: 150px; border-radius: 5px; cursor: pointer; }
+    .status { margin-top: 10px; font-weight: bold; color: #333; }
+    .charts-container { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 30px; }
+    .chart-box { width: 400px; height: 300px; }
+    .inline-option { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; font-size: 14px; }
+    .muted { color: #666; font-size: 13px; }
+    .bulk-card { width: min(1680px, calc(100vw - 48px)); max-width: none; margin-left: 50%; transform: translateX(-50%); box-sizing: border-box; }
+    .table-wrap { width: 100%; overflow-x: auto; margin-top: 20px; padding-bottom: 6px; }
+    #download-csv-btn { display: none; margin-top: 15px; margin-bottom: 10px; padding: 10px 15px; font-weight: bold; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+    #download-csv-btn:hover { background: #0056b3; }
+    .lightbox-overlay { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.85); justify-content: center; align-items: center; }
+    .lightbox-content { max-width: 90%; max-height: 90%; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    .lightbox-close { position: absolute; top: 20px; right: 30px; color: white; font-size: 40px; font-weight: bold; cursor: pointer; user-select: none; }
+    .lightbox-close:hover { color: #ddd; }
+  </style>
+</head>
+<body>
+  <!-- THE NEW LOGIN SCREEN -->
+  <div id="login-view" class="container" style="max-width: 400px; margin-top: 15vh; text-align: center;">
+    <section class="card">
+      <h1 style="margin-top: 20px; margin-bottom: 25px;">Access App</h1>
+      <form id="login-form">
+        <input type="text" id="login-name" placeholder="Enter Name (for analytics)" required style="padding: 10px; font-size: 16px; width: 100%; box-sizing: border-box; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px;">
+        <input type="password" id="login-password" placeholder="Enter Password" required style="padding: 10px; font-size: 16px; width: 100%; box-sizing: border-box; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px;">
+        <button type="submit" style="width: 100%; padding: 10px; font-size: 16px;">Login</button>
+      </form>
+      <div id="login-error" class="status" style="color: red; margin-top: 10px;"></div>
+      <p class="muted" style="margin-top: 10px;">To request access, please email <a href="mailto:zsong@uga.edu">zsong@uga.edu</a> with your institution email.</p>
+    </section>
+  </div>
+
+  <!-- THE MAIN APP (Hidden by default) -->
+  <main id="app-view" class="container" style="display: none;">
+    <h1>Phenotyping</h1>
+
+    <!-- SERVER QUEUE DASHBOARD -->
+    <div id="server-status" style="background: #e9ecef; padding: 10px; border-radius: 5px; margin-bottom: 20px; text-align: center; font-weight: bold; color: #555; transition: all 0.3s;">
+      Connecting to server...
+    </div>
+    
+    <section class="card">
+      <h2>Single Image Analysis</h2>
+      <form id="single-form">
+        <input type="file" id="single-file" accept=".jpg,.jpeg,.png" required>
+        <button type="submit">Process Single</button>
+      </form>
+      <div id="single-status" class="status"></div>
+      <div id="single-result" class="result-grid"></div>
+    </section>
+
+    <section id="bulk-section" class="card">
+      <h2>Bulk Image Analysis</h2>
+      <form id="bulk-form">
+        <input type="file" id="bulk-files" multiple accept=".jpg,.jpeg,.png" required>
+        <label class="inline-option">
+          <input type="checkbox" id="bulk-previews">
+          Include previews
+        </label>
+        <button type="submit">Process Batch</button>
+      </form>
+      <div id="bulk-status" class="status"></div>
+
+      <div id="batch-timer" class="muted" style="display: none; margin-top: 5px; font-family: monospace; font-size: 14px;"></div>
+      
+      <button id="download-csv-btn">Download CSV</button>
+      
+      <div class="table-wrap">
+        <table id="bulk-table" style="display: none;">
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>R² Rind</th>
+              <th>R² Flesh</th>
+              <th>Width (Raw)</th>
+              <th>Width (Sm)</th>
+              <th>Height (Raw)</th>
+              <th>Height (Sm)</th>
+              <th>Perim (Raw)</th>
+              <th>Perim (Sm)</th>
+              <th>F.Width (Raw)</th>
+              <th>F.Width (Sm)</th>
+              <th>F.Height (Raw)</th>
+              <th>F.Height (Sm)</th>
+              <th>F.Perim (Raw)</th>
+              <th>F.Perim (Sm)</th>
+              <th>Rind Thick (Raw)</th>
+              <th>Rind Thick (Sm)</th>
+              <th>Rind Ratio (Raw)</th>
+              <th>Rind Ratio (Sm)</th>
+              <th>Tot Area (Raw)</th>
+              <th>Tot Area (Sm)</th>
+              <th>Flesh Area (Raw)</th>
+              <th>Flesh Area (Sm)</th>
+              <th>Flesh Rat (Raw)</th>
+              <th>Flesh Rat (Sm)</th>
+              <th>Elong (Raw)</th>
+              <th>Elong (Sm)</th>
+              <th>Asym (Raw)</th>
+              <th>Asym (Sm)</th>
+              <th>F.Asym (Raw)</th>
+              <th>F.Asym (Sm)</th>
+              <th>Circ (Raw)</th>
+              <th>Circ (Sm)</th>
+              <th>Midline Curve</th>
+              <th>Init ΔE</th>
+              <th>Final ΔE</th>
+              <th>Time (ms)</th>
+              <th>Preview (Raw)</th>
+              <th>Preview (Smooth)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      
+      <div id="histograms-container" class="charts-container"></div>
+    </section>
+  </main>
+
+  <div id="lightbox" class="lightbox-overlay">
+    <span class="lightbox-close" id="lightbox-close">&times;</span>
+    <img class="lightbox-content" id="lightbox-img">
+  </div>
+  
+  <!-- Adding ?v=... forces the browser to fetch the newest version -->
+  <script src="app.js?v=6"></script>
+</body>
+</html>
