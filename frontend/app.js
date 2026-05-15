@@ -1,5 +1,5 @@
 // For local testing, change to http://localhost:8000/process_single
-const API_URL = "https://crabbly-watermelonphenotyping.hf.space/process_single";
+let API_URL = "https://crabbly-watermelonphenotyping.hf.space/process_single";
 const SINGLE_REQUEST_TIMEOUT_MS = 120000; // 2 minutes
 const BULK_REQUEST_TIMEOUT_MS = 30000;    // Increased to 30 seconds to prevent premature drops
 const BULK_TIMEOUT_MESSAGE = "Taking longer than 30 seconds. Moving on.";
@@ -22,9 +22,19 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     const uname = document.getElementById("login-name").value.trim();
     const errorDiv = document.getElementById("login-error");
     
-    if (await sha256(pwd) === TARGET_HASH) {
+    if (hash === TARGET_HASH) {
         currentPassword = pwd;
         currentUsername = uname;
+            
+        // --- NEW ROUTING LOGIC ---
+        if (currentUsername.toLowerCase() === 'devtest') {
+            API_URL = "https://crabbly-watermelon-dev.hf.space/process_single";
+            console.log("Routed to Experimental Server");
+        } else {
+            API_URL = "https://crabbly-watermelonphenotyping.hf.space/process_single";
+        }
+        // -------------------------
+
         document.getElementById("login-view").style.display = "none";
         document.getElementById("app-view").style.display = "block";
 
