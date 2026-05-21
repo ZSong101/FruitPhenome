@@ -625,26 +625,33 @@ lightbox.addEventListener("click", (e) => {
 
 // --- LIVE QUEUE POLLING ---
 function startQueuePolling() {
-    const statusEndpoint = API_URL.replace("/process_single", "/queue_status");
+    // FOOLPROOF URL ROUTING: Splits the base URL and forces it to hit the new proxy_status endpoint
+    const baseUrl = API_URL.split("/proxy_process")[0];
+    const statusEndpoint = `${baseUrl}/proxy_status?username=${encodeURIComponent(currentUsername)}`;
     
     setInterval(async () => {
         try {
             const res = await fetch(statusEndpoint);
-            const data = await res.json();
+            if (!res.ok) return; // Silently ignore errors during server bootup
             
+            const data = await res.json();
             const statusDiv = document.getElementById("server-status");
             const isDev = currentUsername.toLowerCase() === 'devtest';
+            const envName = isDev ? "Development Environment" : "Production Environment";
             
-            // Route to correct queue
-            let myQueue = isDev ? data.dev_queue : data.gen_queue;
-            let coreName = isDev ? "Reserved 'devtest' Core" : "General Core";
+            // Read the new concurrency variables
+            const active = data.active_requests || 0;
+            const max = data.max_concurrent || 2;
             
-            if (myQueue === 0) {
-                statusDiv.innerHTML = `Server Ready | <strong>${coreName}</strong>.`;
+            if (active < max) {
+                // Not full yet (0 or 1 cores in use)
+                statusDiv.innerHTML = `Server Ready | <strong>${envName}</strong> (Cores in use: ${active}/${max})`;
                 statusDiv.style.color = "#155724";
                 statusDiv.style.backgroundColor = "#d4edda";
             } else {
-                statusDiv.innerHTML = `Processing | <strong>${myQueue}</strong> request(s) in <strong>${coreName}</strong> queue.`;
+                // 2 cores in use, anything extra is in the queue
+                const queued = active - max;
+                statusDiv.innerHTML = `Processing | <strong>${envName}</strong> (Cores in use: ${max}/${max}) - ${queued} in queue`;
                 statusDiv.style.color = "#856404";
                 statusDiv.style.backgroundColor = "#fff3cd";
             }
