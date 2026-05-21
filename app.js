@@ -26,13 +26,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     if (await sha256(pwd) === TARGET_HASH) {
         currentPassword = pwd;
         currentUsername = uname;
-        if (currentUsername.toLowerCase() === 'devtest') {
-            API_URL = "https://crabbly-watermelon-dev.hf.space/process_single";
-            console.log("Routed to Experimental Server");
-        } else {
-            API_URL = "https://crabbly-watermelonphenotyping.hf.space/process_single";
-            console.log("Routed to Production Server");
-        }
+        console.log(`Logged in as ${currentUsername}. Sending traffic via Proxy.`);
         document.getElementById("login-view").style.display = "none";
         document.getElementById("app-view").style.display = "block";
 
