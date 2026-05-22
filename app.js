@@ -650,31 +650,30 @@ lightbox.addEventListener("click", (e) => {
 
 // --- LIVE QUEUE POLLING ---
 function startQueuePolling() {
-    // FOOLPROOF URL ROUTING: Splits the base URL and forces it to hit the new proxy_status endpoint
     const baseUrl = API_URL.split("/proxy_process")[0];
-    const statusEndpoint = `${baseUrl}/proxy_status?username=${encodeURIComponent(currentUsername)}`;
     
     setInterval(async () => {
+        // --- FIX: Added '&_t=' cache buster so the browser fetches fresh data every time ---
+        const statusEndpoint = `${baseUrl}/proxy_status?username=${encodeURIComponent(currentUsername)}&_t=${Date.now()}`;
+        
         try {
-            const res = await fetch(statusEndpoint);
-            if (!res.ok) return; // Silently ignore errors during server bootup
+            // --- FIX: Explicitly told the fetch command not to use cached memory ---
+            const res = await fetch(statusEndpoint, { cache: "no-store" });
+            if (!res.ok) return; 
             
             const data = await res.json();
             const statusDiv = document.getElementById("server-status");
             const isDev = currentUsername.toLowerCase() === 'devtest';
             const envName = isDev ? "Development Environment" : "Production Environment";
             
-            // Read the new concurrency variables
             const active = data.active_requests || 0;
             const max = data.max_concurrent || 2;
             
             if (active < max) {
-                // Not full yet (0 or 1 cores in use)
                 statusDiv.innerHTML = `Server Ready | <strong>${envName}</strong> (Cores in use: ${active}/${max})`;
                 statusDiv.style.color = "#155724";
                 statusDiv.style.backgroundColor = "#d4edda";
             } else {
-                // 2 cores in use, anything extra is in the queue
                 const queued = active - max;
                 statusDiv.innerHTML = `Processing | <strong>${envName}</strong> (Cores in use: ${max}/${max}) - ${queued} in queue`;
                 statusDiv.style.color = "#856404";
@@ -683,5 +682,5 @@ function startQueuePolling() {
         } catch (err) {
             // Silently ignore network blips during polling
         }
-    }, 2000); // Check every 2 seconds
+    }, 2000); 
 }
