@@ -273,7 +273,32 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     // Reset global state
     globalBatchResults = [];
     let completed = 0, successCount = 0, failureCount = 0, pixelScaleCount = 0;
-
+    
+    // --- RESTORED TIMER INITIALIZATION ---
+    const timerDiv = document.getElementById("batch-timer");
+    if (timerDiv) {
+        timerDiv.style.display = "block";
+        timerDiv.innerText = "Elapsed: 00:00 | ETA: Calculating...";
+    }
+    const batchStartTime = Date.now();
+    let timerInterval = setInterval(() => {
+        if (!timerDiv) return;
+        const elapsedSec = Math.floor((Date.now() - batchStartTime) / 1000);
+        const m = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+        const s = String(elapsedSec % 60).padStart(2, '0');
+        
+        let etaStr = "Calculating...";
+        if (completed > 0 && completed < files.length) {
+            const timePerImg = elapsedSec / completed;
+            const remainingSec = Math.floor(timePerImg * (files.length - completed));
+            const rm = String(Math.floor(remainingSec / 60)).padStart(2, '0');
+            const rs = String(remainingSec % 60).padStart(2, '0');
+            etaStr = `${rm}:${rs}`;
+        }
+        timerDiv.innerText = `Elapsed: ${m}:${s} | ETA: ${etaStr}`;
+    }, 1000);
+    // -------------------------------------
+    
     for (let i = 0; i < files.length; i++) {
         status.innerText = `Processing image ${i + 1} of ${files.length}...`;
 
