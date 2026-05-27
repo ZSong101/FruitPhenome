@@ -197,84 +197,163 @@ const COLUMN_GROUPS = [
     {
         id: "experimental",
         label: "Experimental",
-        columns: [
-            metricColumn("r2_rind", "R² Rind", "r2_rind", 4, { csvLabel: "R2 Rind" }),
-            metricColumn("r2_flesh", "R² Flesh", "r2_flesh", 4, { csvLabel: "R2 Flesh" }),
-            cmMetricColumn("raw_width", "Width (Raw)", "raw_width", undefined, { histLabel: "Width - Raw (cm)" }),
-            cmMetricColumn("sm_width", "Width (Sm)", "sm_width", undefined, { histLabel: "Width - Sm (cm)" }),
-            cmMetricColumn("raw_height", "Height (Raw)", "raw_height", undefined, { histLabel: "Height - Raw (cm)" }),
-            cmMetricColumn("sm_height", "Height (Sm)", "sm_height", undefined, { histLabel: "Height - Sm (cm)" }),
-            cmMetricColumn("raw_perimeter", "Perim (Raw)", "raw_perimeter", undefined, { histLabel: "Perim - Raw (cm)" }),
-            cmMetricColumn("sm_perimeter", "Perim (Sm)", "sm_perimeter", undefined, { histLabel: "Perim - Sm (cm)" }),
-            cmMetricColumn("raw_flesh_width", "F.Width (Raw)", "raw_flesh_width", undefined, { histLabel: "F.Width - Raw (cm)" }),
-            cmMetricColumn("sm_flesh_width", "F.Width (Sm)", "sm_flesh_width", undefined, { histLabel: "F.Width - Sm (cm)" }),
-            cmMetricColumn("raw_flesh_height", "F.Height (Raw)", "raw_flesh_height", undefined, { histLabel: "F.Height - Raw (cm)" }),
-            cmMetricColumn("sm_flesh_height", "F.Height (Sm)", "sm_flesh_height", undefined, { histLabel: "F.Height - Sm (cm)" }),
-            cmMetricColumn("raw_flesh_perimeter", "F.Perim (Raw)", "raw_flesh_perimeter", undefined, { histLabel: "F.Perim - Raw (cm)" }),
-            cmMetricColumn("sm_flesh_perimeter", "F.Perim (Sm)", "sm_flesh_perimeter", undefined, { histLabel: "F.Perim - Sm (cm)" }),
-            cmMetricColumn("raw_rind_thick", "Rind Thick (Raw)", "raw_rind_thick", undefined, { histLabel: "Rind Thick - Raw (cm)" }),
-            cmMetricColumn("sm_rind_thick", "Rind Thick (Sm)", "sm_rind_thick", undefined, { histLabel: "Rind Thick - Sm (cm)" }),
-            metricColumn("raw_rind_ratio", "Rind Ratio (Raw)", "raw_rind_ratio", 3, { histLabel: "Rind Ratio - Raw" }),
-            metricColumn("sm_rind_ratio", "Rind Ratio (Sm)", "sm_rind_ratio", 3, { histLabel: "Rind Ratio - Sm" }),
-            cmMetricColumn("raw_total_area", "Tot Area (Raw)", "raw_total_area", undefined, { histLabel: "Total Area - Raw (cm²)" }),
-            cmMetricColumn("sm_total_area", "Tot Area (Sm)", "sm_total_area", undefined, { histLabel: "Total Area - Sm (cm²)" }),
-            cmMetricColumn("raw_flesh_area", "Flesh Area (Raw)", "raw_flesh_area", undefined, { histLabel: "Flesh Area - Raw (cm²)" }),
-            cmMetricColumn("sm_flesh_area", "Flesh Area (Sm)", "sm_flesh_area", undefined, { histLabel: "Flesh Area - Sm (cm²)" }),
-            metricColumn("raw_flesh_ratio", "Flesh Rat (Raw)", "raw_flesh_ratio", 3, { histLabel: "Flesh Ratio - Raw" }),
-            metricColumn("sm_flesh_ratio", "Flesh Rat (Sm)", "sm_flesh_ratio", 3, { histLabel: "Flesh Ratio - Sm" }),
-            metricColumn("raw_elongation", "Elong (Raw)", "raw_elongation", 3, { histLabel: "Elongation - Raw" }),
-            metricColumn("sm_elongation", "Elong (Sm)", "sm_elongation", 3, { histLabel: "Elongation - Sm" }),
-            metricColumn("raw_asym", "Asym (Raw)", "raw_asym", 3, { histLabel: "Asymmetry - Raw" }),
-            metricColumn("sm_asym", "Asym (Sm)", "sm_asym", 3, { histLabel: "Asymmetry - Sm" }),
-            metricColumn("raw_flesh_asym", "F.Asym (Raw)", "raw_flesh_asym", 3, { histLabel: "Flesh Asym - Raw" }),
-            metricColumn("sm_flesh_asym", "F.Asym (Sm)", "sm_flesh_asym", 3, { histLabel: "Flesh Asym - Sm" }),
-            metricColumn("raw_circ", "Circ (Raw)", "raw_circ", 3, { histLabel: "Circularity - Raw" }),
-            metricColumn("sm_circ", "Circ (Sm)", "sm_circ", 3, { histLabel: "Circularity - Sm" }),
-            metricColumn("midline_curvature", "Midline Curve", "midline_curvature", 4),
-            metricColumn("delta_e_initial", "Init ΔE", "delta_e_initial", 2, { histLabel: "Initial ΔE" }),
-            metricColumn("delta_e_final", "Final ΔE", "delta_e_final", 2, { histLabel: "Final ΔE" }),
-            metricColumn("processing_ms", "Time (ms)", "processing_ms", 0),
-            metricColumn("notes", "Notes", null, 0, {
-                histogram: false,
-                cellClass: "notes-cell",
-                get: (_data, item) => item.notes || ""
-            }),
-            previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
-            previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64")
+        children: [
+            {
+                id: "experimental_raw",
+                label: "Raw Features",
+                columns: [
+                    cmMetricColumn("raw_width", "Width (Raw)", "raw_width", undefined, { histLabel: "Width - Raw (cm)" }),
+                    cmMetricColumn("raw_height", "Height (Raw)", "raw_height", undefined, { histLabel: "Height - Raw (cm)" }),
+                    cmMetricColumn("raw_perimeter", "Perim (Raw)", "raw_perimeter", undefined, { histLabel: "Perim - Raw (cm)" }),
+                    cmMetricColumn("raw_flesh_width", "F.Width (Raw)", "raw_flesh_width", undefined, { histLabel: "F.Width - Raw (cm)" }),
+                    cmMetricColumn("raw_flesh_height", "F.Height (Raw)", "raw_flesh_height", undefined, { histLabel: "F.Height - Raw (cm)" }),
+                    cmMetricColumn("raw_flesh_perimeter", "F.Perim (Raw)", "raw_flesh_perimeter", undefined, { histLabel: "F.Perim - Raw (cm)" }),
+                    cmMetricColumn("raw_rind_thick", "Rind Thick (Raw)", "raw_rind_thick", undefined, { histLabel: "Rind Thick - Raw (cm)" }),
+                    metricColumn("raw_rind_ratio", "Rind Ratio (Raw)", "raw_rind_ratio", 3, { histLabel: "Rind Ratio - Raw" }),
+                    cmMetricColumn("raw_total_area", "Tot Area (Raw)", "raw_total_area", undefined, { histLabel: "Total Area - Raw (cm²)" }),
+                    cmMetricColumn("raw_flesh_area", "Flesh Area (Raw)", "raw_flesh_area", undefined, { histLabel: "Flesh Area - Raw (cm²)" }),
+                    metricColumn("raw_flesh_ratio", "Flesh Rat (Raw)", "raw_flesh_ratio", 3, { histLabel: "Flesh Ratio - Raw" }),
+                    metricColumn("raw_elongation", "Elong (Raw)", "raw_elongation", 3, { histLabel: "Elongation - Raw" }),
+                    metricColumn("raw_asym", "Asym (Raw)", "raw_asym", 3, { histLabel: "Asymmetry - Raw" }),
+                    metricColumn("raw_flesh_asym", "F.Asym (Raw)", "raw_flesh_asym", 3, { histLabel: "Flesh Asym - Raw" }),
+                    metricColumn("raw_circ", "Circ (Raw)", "raw_circ", 3, { histLabel: "Circularity - Raw" })
+                ]
+            },
+            {
+                id: "experimental_smoothed",
+                label: "Smoothed Features",
+                columns: [
+                    metricColumn("r2_rind", "R² Rind", "r2_rind", 4, { csvLabel: "R2 Rind" }),
+                    metricColumn("r2_flesh", "R² Flesh", "r2_flesh", 4, { csvLabel: "R2 Flesh" }),
+                    cmMetricColumn("sm_width", "Width (Sm)", "sm_width", undefined, { histLabel: "Width - Sm (cm)" }),
+                    cmMetricColumn("sm_height", "Height (Sm)", "sm_height", undefined, { histLabel: "Height - Sm (cm)" }),
+                    cmMetricColumn("sm_perimeter", "Perim (Sm)", "sm_perimeter", undefined, { histLabel: "Perim - Sm (cm)" }),
+                    cmMetricColumn("sm_flesh_width", "F.Width (Sm)", "sm_flesh_width", undefined, { histLabel: "F.Width - Sm (cm)" }),
+                    cmMetricColumn("sm_flesh_height", "F.Height (Sm)", "sm_flesh_height", undefined, { histLabel: "F.Height - Sm (cm)" }),
+                    cmMetricColumn("sm_flesh_perimeter", "F.Perim (Sm)", "sm_flesh_perimeter", undefined, { histLabel: "F.Perim - Sm (cm)" }),
+                    cmMetricColumn("sm_rind_thick", "Rind Thick (Sm)", "sm_rind_thick", undefined, { histLabel: "Rind Thick - Sm (cm)" }),
+                    metricColumn("sm_rind_ratio", "Rind Ratio (Sm)", "sm_rind_ratio", 3, { histLabel: "Rind Ratio - Sm" }),
+                    cmMetricColumn("sm_total_area", "Tot Area (Sm)", "sm_total_area", undefined, { histLabel: "Total Area - Sm (cm²)" }),
+                    cmMetricColumn("sm_flesh_area", "Flesh Area (Sm)", "sm_flesh_area", undefined, { histLabel: "Flesh Area - Sm (cm²)" }),
+                    metricColumn("sm_flesh_ratio", "Flesh Rat (Sm)", "sm_flesh_ratio", 3, { histLabel: "Flesh Ratio - Sm" }),
+                    metricColumn("sm_elongation", "Elong (Sm)", "sm_elongation", 3, { histLabel: "Elongation - Sm" }),
+                    metricColumn("sm_asym", "Asym (Sm)", "sm_asym", 3, { histLabel: "Asymmetry - Sm" }),
+                    metricColumn("sm_flesh_asym", "F.Asym (Sm)", "sm_flesh_asym", 3, { histLabel: "Flesh Asym - Sm" }),
+                    metricColumn("sm_circ", "Circ (Sm)", "sm_circ", 3, { histLabel: "Circularity - Sm" }),
+                    metricColumn("midline_curvature", "Midline Curve", "midline_curvature", 4)
+                ]
+            },
+            {
+                id: "experimental_color",
+                label: "Color Calibration",
+                columns: [
+                    metricColumn("delta_e_initial", "Init ΔE", "delta_e_initial", 2, { histLabel: "Initial ΔE" }),
+                    metricColumn("delta_e_final", "Final ΔE", "delta_e_final", 2, { histLabel: "Final ΔE" })
+                ]
+            }
         ]
     },
     {
         id: "traditional",
         label: "Traditional",
+        children: [
+            {
+                id: "traditional_shape_index",
+                label: "Shape Index",
+                columns: [
+                    metricColumn("trad_shape_index_i", "fs I H/W", "trad_shape_index_i", 3),
+                    metricColumn("trad_shape_index_ii", "fs II Hm/Wm", "trad_shape_index_ii", 3),
+                    metricColumn("trad_triangle", "Triangle w1/w2", "trad_triangle", 3)
+                ]
+            },
+            {
+                id: "traditional_eccentric",
+                label: "Eccentricity & Asymmetry",
+                columns: [
+                    metricColumn("trad_obovoid", "Obovoid", "trad_obovoid", 3),
+                    metricColumn("trad_ovoid", "Ovoid", "trad_ovoid", 3),
+                    metricColumn("trad_horizontal_asymmetry", "Horiz Asym", "trad_horizontal_asymmetry", 4),
+                    metricColumn("trad_vertical_asymmetry", "Vert Asym", "trad_vertical_asymmetry", 4)
+                ]
+            },
+            {
+                id: "traditional_end_shape",
+                label: "End Shape",
+                columns: [
+                    metricColumn("trad_distal_angle", "Distal Angle", "trad_distal_angle", 1),
+                    metricColumn("trad_distal_blockiness", "Distal Blockiness", "trad_distal_blockiness", 3),
+                    metricColumn("trad_distal_indentation_area", "Distal Indent Area", "trad_distal_indentation_area", 4),
+                    metricColumn("trad_proximal_angle", "Proximal Angle", "trad_proximal_angle", 1),
+                    metricColumn("trad_proximal_blockiness", "Proximal Blockiness", "trad_proximal_blockiness", 3),
+                    metricColumn("trad_proximal_shoulder_height", "Shoulder Height", "trad_proximal_shoulder_height", 4),
+                    metricColumn("trad_proximal_indentation_area", "Proximal Indent Area", "trad_proximal_indentation_area", 4)
+                ]
+            },
+            {
+                id: "traditional_fit",
+                label: "Common Shape Fit",
+                columns: [
+                    metricColumn("trad_circular_r2", "Circular R²", "trad_circular_r2", 4, { csvLabel: "Circular R2" }),
+                    metricColumn("trad_ellipsoid_r2", "Ellipsoid R²", "trad_ellipsoid_r2", 4, { csvLabel: "Ellipsoid R2" }),
+                    metricColumn("trad_taperness", "Heart Taperness", "trad_taperness", 3),
+                    metricColumn("trad_heart", "Heart Score", "trad_heart", 3),
+                    metricColumn("trad_rectangularity", "Rectangularity", "trad_rectangularity", 4)
+                ]
+            }
+        ]
+    },
+    {
+        id: "previews",
+        label: "Previews",
         columns: [
-            metricColumn("trad_shape_index_i", "fs I H/W", "trad_shape_index_i", 3),
-            metricColumn("trad_shape_index_ii", "fs II Hm/Wm", "trad_shape_index_ii", 3),
-            metricColumn("trad_triangle", "Triangle w1/w2", "trad_triangle", 3),
-            metricColumn("trad_obovoid", "Obovoid", "trad_obovoid", 3),
-            metricColumn("trad_ovoid", "Ovoid", "trad_ovoid", 3),
-            metricColumn("trad_horizontal_asymmetry", "Horiz Asym", "trad_horizontal_asymmetry", 4),
-            metricColumn("trad_vertical_asymmetry", "Vert Asym", "trad_vertical_asymmetry", 4),
-            metricColumn("trad_distal_angle", "Distal Angle", "trad_distal_angle", 1),
-            metricColumn("trad_distal_blockiness", "Distal Blockiness", "trad_distal_blockiness", 3),
-            metricColumn("trad_distal_indentation_area", "Distal Indent Area", "trad_distal_indentation_area", 4),
-            metricColumn("trad_proximal_angle", "Proximal Angle", "trad_proximal_angle", 1),
-            metricColumn("trad_proximal_blockiness", "Proximal Blockiness", "trad_proximal_blockiness", 3),
-            metricColumn("trad_proximal_shoulder_height", "Shoulder Height", "trad_proximal_shoulder_height", 4),
-            metricColumn("trad_proximal_indentation_area", "Proximal Indent Area", "trad_proximal_indentation_area", 4),
-            metricColumn("trad_circular_r2", "Circular R²", "trad_circular_r2", 4, { csvLabel: "Circular R2" }),
-            metricColumn("trad_ellipsoid_r2", "Ellipsoid R²", "trad_ellipsoid_r2", 4, { csvLabel: "Ellipsoid R2" }),
-            metricColumn("trad_taperness", "Heart Taperness", "trad_taperness", 3),
-            metricColumn("trad_heart", "Heart Score", "trad_heart", 3),
-            metricColumn("trad_rectangularity", "Rectangularity", "trad_rectangularity", 4)
+            previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
+            previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
+            previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64"),
+            previewColumn("image_traditional_base64", "Preview (Traditional)", "image_traditional_base64")
+        ]
+    },
+    {
+        id: "run_info",
+        label: "Run Info",
+        columns: [
+            metricColumn("processing_ms", "Time (ms)", "processing_ms", 0)
         ]
     }
 ];
 
-const ALL_COLUMNS = COLUMN_GROUPS.flatMap(group => group.columns.map(column => ({ ...column, groupId: group.id })));
+function collectColumns(group, parentId = null) {
+    const direct = (group.columns || []).map(column => ({ ...column, groupId: group.id || parentId }));
+    const nested = (group.children || []).flatMap(child => collectColumns(child, group.id || parentId));
+    return [...direct, ...nested];
+}
+
+function collectGroups(groups, map = new Map()) {
+    groups.forEach(group => {
+        map.set(group.id, group);
+        if (group.children) collectGroups(group.children, map);
+    });
+    return map;
+}
+
+function columnsForGroup(group) {
+    if (!group) return [];
+    return collectColumns(group);
+}
+
+const ALL_COLUMNS = COLUMN_GROUPS.flatMap(group => collectColumns(group));
+const COLUMN_GROUP_MAP = collectGroups(COLUMN_GROUPS);
 let visibleColumnIds = new Set(ALL_COLUMNS.map(column => column.id));
 
 function visibleColumns() {
     return ALL_COLUMNS.filter(column => visibleColumnIds.has(column.id));
+}
+
+function visiblePreviewColumns() {
+    return visibleColumns().filter(column => column.id.startsWith("image_"));
+}
+
+function shouldRequestPreviews() {
+    return visiblePreviewColumns().length > 0;
 }
 
 function columnValue(column, item) {
@@ -293,24 +372,29 @@ function renderColumnPicker() {
     const menu = document.getElementById("column-menu");
     if (!menu) return;
 
-    menu.innerHTML = COLUMN_GROUPS.map(group => `
-        <details class="column-group" open>
+    const renderGroup = (group, depth = 0) => `
+        <details class="column-group column-depth-${depth}" open>
             <summary>
                 <label>
                     <input type="checkbox" class="column-group-checkbox" data-group-id="${group.id}">
                     ${escapeHtml(group.label)}
                 </label>
             </summary>
-            <div class="column-options">
-                ${group.columns.map(column => `
+            <div class="column-children">
+                ${(group.children || []).map(child => renderGroup(child, depth + 1)).join("")}
+                ${group.columns && group.columns.length ? `<div class="column-options">
+                    ${group.columns.map(column => `
                     <label class="column-option">
                         <input type="checkbox" class="column-checkbox" data-column-id="${column.id}">
                         ${escapeHtml(column.label)}
                     </label>
-                `).join("")}
+                    `).join("")}
+                </div>` : ""}
             </div>
         </details>
-    `).join("");
+    `;
+
+    menu.innerHTML = COLUMN_GROUPS.map(group => renderGroup(group)).join("");
 
     updateColumnPickerChecks();
 }
@@ -321,10 +405,11 @@ function updateColumnPickerChecks() {
     });
 
     document.querySelectorAll(".column-group-checkbox").forEach(input => {
-        const group = COLUMN_GROUPS.find(g => g.id === input.dataset.groupId);
-        const selectedCount = group.columns.filter(column => visibleColumnIds.has(column.id)).length;
-        input.checked = selectedCount === group.columns.length;
-        input.indeterminate = selectedCount > 0 && selectedCount < group.columns.length;
+        const group = COLUMN_GROUP_MAP.get(input.dataset.groupId);
+        const columns = group ? columnsForGroup(group) : [];
+        const selectedCount = columns.filter(column => visibleColumnIds.has(column.id)).length;
+        input.checked = columns.length > 0 && selectedCount === columns.length;
+        input.indeterminate = selectedCount > 0 && selectedCount < columns.length;
     });
 }
 
@@ -354,8 +439,8 @@ function setupColumnControls() {
     document.getElementById("column-menu")?.addEventListener("change", (event) => {
         const target = event.target;
         if (target.classList.contains("column-group-checkbox")) {
-            const group = COLUMN_GROUPS.find(g => g.id === target.dataset.groupId);
-            group.columns.forEach(column => {
+            const group = COLUMN_GROUP_MAP.get(target.dataset.groupId);
+            columnsForGroup(group).forEach(column => {
                 if (target.checked) visibleColumnIds.add(column.id);
                 else visibleColumnIds.delete(column.id);
             });
@@ -530,7 +615,6 @@ function renderBulkTable() {
 document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const files = document.getElementById("bulk-files").files;
-    const includeImages = document.getElementById("bulk-previews") ? document.getElementById("bulk-previews").checked : true;
     const status = document.getElementById("bulk-status");
     const table = document.getElementById("bulk-table");
     const chartsContainer = document.getElementById("histograms-container");
@@ -575,7 +659,7 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
         status.innerText = `Processing image ${i + 1} of ${files.length}...`;
 
         try {
-            const data = await postBulkImage(files[i], includeImages);
+            const data = await postBulkImage(files[i], shouldRequestPreviews());
 
             if (data.success) {
                 successCount++;
