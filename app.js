@@ -155,6 +155,222 @@ function previewCell(data) {
     return `<span class="muted">Disabled</span>`;
 }
 
+function valueOrNull(value) {
+    return value === undefined ? null : value;
+}
+
+function metricColumn(id, label, field, digits = 3, options = {}) {
+    return {
+        id,
+        label,
+        histLabel: options.histLabel || label,
+        csvLabel: options.csvLabel || label,
+        digits,
+        histogram: options.histogram !== false,
+        csv: options.csv !== false,
+        cellClass: options.cellClass || "",
+        get: options.get || ((data) => valueOrNull(data[field]))
+    };
+}
+
+function cmMetricColumn(id, label, field, digits = (item) => item.digits, options = {}) {
+    return metricColumn(id, label, field, digits, {
+        ...options,
+        get: (data, item) => item.isCm ? valueOrNull(data[field]) : null
+    });
+}
+
+function previewColumn(id, label, field) {
+    return {
+        id,
+        label,
+        histogram: false,
+        csv: false,
+        get: () => null,
+        html: (item) => item.data[field]
+            ? `<img src="data:image/jpeg;base64,${item.data[field]}" class="thumb preview-img">`
+            : `<span class="muted">-</span>`
+    };
+}
+
+const COLUMN_GROUPS = [
+    {
+        id: "experimental",
+        label: "Experimental",
+        columns: [
+            metricColumn("r2_rind", "R² Rind", "r2_rind", 4, { csvLabel: "R2 Rind" }),
+            metricColumn("r2_flesh", "R² Flesh", "r2_flesh", 4, { csvLabel: "R2 Flesh" }),
+            cmMetricColumn("raw_width", "Width (Raw)", "raw_width", undefined, { histLabel: "Width - Raw (cm)" }),
+            cmMetricColumn("sm_width", "Width (Sm)", "sm_width", undefined, { histLabel: "Width - Sm (cm)" }),
+            cmMetricColumn("raw_height", "Height (Raw)", "raw_height", undefined, { histLabel: "Height - Raw (cm)" }),
+            cmMetricColumn("sm_height", "Height (Sm)", "sm_height", undefined, { histLabel: "Height - Sm (cm)" }),
+            cmMetricColumn("raw_perimeter", "Perim (Raw)", "raw_perimeter", undefined, { histLabel: "Perim - Raw (cm)" }),
+            cmMetricColumn("sm_perimeter", "Perim (Sm)", "sm_perimeter", undefined, { histLabel: "Perim - Sm (cm)" }),
+            cmMetricColumn("raw_flesh_width", "F.Width (Raw)", "raw_flesh_width", undefined, { histLabel: "F.Width - Raw (cm)" }),
+            cmMetricColumn("sm_flesh_width", "F.Width (Sm)", "sm_flesh_width", undefined, { histLabel: "F.Width - Sm (cm)" }),
+            cmMetricColumn("raw_flesh_height", "F.Height (Raw)", "raw_flesh_height", undefined, { histLabel: "F.Height - Raw (cm)" }),
+            cmMetricColumn("sm_flesh_height", "F.Height (Sm)", "sm_flesh_height", undefined, { histLabel: "F.Height - Sm (cm)" }),
+            cmMetricColumn("raw_flesh_perimeter", "F.Perim (Raw)", "raw_flesh_perimeter", undefined, { histLabel: "F.Perim - Raw (cm)" }),
+            cmMetricColumn("sm_flesh_perimeter", "F.Perim (Sm)", "sm_flesh_perimeter", undefined, { histLabel: "F.Perim - Sm (cm)" }),
+            cmMetricColumn("raw_rind_thick", "Rind Thick (Raw)", "raw_rind_thick", undefined, { histLabel: "Rind Thick - Raw (cm)" }),
+            cmMetricColumn("sm_rind_thick", "Rind Thick (Sm)", "sm_rind_thick", undefined, { histLabel: "Rind Thick - Sm (cm)" }),
+            metricColumn("raw_rind_ratio", "Rind Ratio (Raw)", "raw_rind_ratio", 3, { histLabel: "Rind Ratio - Raw" }),
+            metricColumn("sm_rind_ratio", "Rind Ratio (Sm)", "sm_rind_ratio", 3, { histLabel: "Rind Ratio - Sm" }),
+            cmMetricColumn("raw_total_area", "Tot Area (Raw)", "raw_total_area", undefined, { histLabel: "Total Area - Raw (cm²)" }),
+            cmMetricColumn("sm_total_area", "Tot Area (Sm)", "sm_total_area", undefined, { histLabel: "Total Area - Sm (cm²)" }),
+            cmMetricColumn("raw_flesh_area", "Flesh Area (Raw)", "raw_flesh_area", undefined, { histLabel: "Flesh Area - Raw (cm²)" }),
+            cmMetricColumn("sm_flesh_area", "Flesh Area (Sm)", "sm_flesh_area", undefined, { histLabel: "Flesh Area - Sm (cm²)" }),
+            metricColumn("raw_flesh_ratio", "Flesh Rat (Raw)", "raw_flesh_ratio", 3, { histLabel: "Flesh Ratio - Raw" }),
+            metricColumn("sm_flesh_ratio", "Flesh Rat (Sm)", "sm_flesh_ratio", 3, { histLabel: "Flesh Ratio - Sm" }),
+            metricColumn("raw_elongation", "Elong (Raw)", "raw_elongation", 3, { histLabel: "Elongation - Raw" }),
+            metricColumn("sm_elongation", "Elong (Sm)", "sm_elongation", 3, { histLabel: "Elongation - Sm" }),
+            metricColumn("raw_asym", "Asym (Raw)", "raw_asym", 3, { histLabel: "Asymmetry - Raw" }),
+            metricColumn("sm_asym", "Asym (Sm)", "sm_asym", 3, { histLabel: "Asymmetry - Sm" }),
+            metricColumn("raw_flesh_asym", "F.Asym (Raw)", "raw_flesh_asym", 3, { histLabel: "Flesh Asym - Raw" }),
+            metricColumn("sm_flesh_asym", "F.Asym (Sm)", "sm_flesh_asym", 3, { histLabel: "Flesh Asym - Sm" }),
+            metricColumn("raw_circ", "Circ (Raw)", "raw_circ", 3, { histLabel: "Circularity - Raw" }),
+            metricColumn("sm_circ", "Circ (Sm)", "sm_circ", 3, { histLabel: "Circularity - Sm" }),
+            metricColumn("midline_curvature", "Midline Curve", "midline_curvature", 4),
+            metricColumn("delta_e_initial", "Init ΔE", "delta_e_initial", 2, { histLabel: "Initial ΔE" }),
+            metricColumn("delta_e_final", "Final ΔE", "delta_e_final", 2, { histLabel: "Final ΔE" }),
+            metricColumn("processing_ms", "Time (ms)", "processing_ms", 0),
+            metricColumn("notes", "Notes", null, 0, {
+                histogram: false,
+                cellClass: "notes-cell",
+                get: (_data, item) => item.notes || ""
+            }),
+            previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
+            previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64")
+        ]
+    },
+    {
+        id: "traditional",
+        label: "Traditional",
+        columns: [
+            metricColumn("trad_shape_index_i", "fs I H/W", "trad_shape_index_i", 3),
+            metricColumn("trad_shape_index_ii", "fs II Hm/Wm", "trad_shape_index_ii", 3),
+            metricColumn("trad_triangle", "Triangle w1/w2", "trad_triangle", 3),
+            metricColumn("trad_obovoid", "Obovoid", "trad_obovoid", 3),
+            metricColumn("trad_ovoid", "Ovoid", "trad_ovoid", 3),
+            metricColumn("trad_horizontal_asymmetry", "Horiz Asym", "trad_horizontal_asymmetry", 4),
+            metricColumn("trad_vertical_asymmetry", "Vert Asym", "trad_vertical_asymmetry", 4),
+            metricColumn("trad_distal_angle", "Distal Angle", "trad_distal_angle", 1),
+            metricColumn("trad_distal_blockiness", "Distal Blockiness", "trad_distal_blockiness", 3),
+            metricColumn("trad_distal_indentation_area", "Distal Indent Area", "trad_distal_indentation_area", 4),
+            metricColumn("trad_proximal_angle", "Proximal Angle", "trad_proximal_angle", 1),
+            metricColumn("trad_proximal_blockiness", "Proximal Blockiness", "trad_proximal_blockiness", 3),
+            metricColumn("trad_proximal_shoulder_height", "Shoulder Height", "trad_proximal_shoulder_height", 4),
+            metricColumn("trad_proximal_indentation_area", "Proximal Indent Area", "trad_proximal_indentation_area", 4),
+            metricColumn("trad_circular_r2", "Circular R²", "trad_circular_r2", 4, { csvLabel: "Circular R2" }),
+            metricColumn("trad_ellipsoid_r2", "Ellipsoid R²", "trad_ellipsoid_r2", 4, { csvLabel: "Ellipsoid R2" }),
+            metricColumn("trad_taperness", "Heart Taperness", "trad_taperness", 3),
+            metricColumn("trad_heart", "Heart Score", "trad_heart", 3),
+            metricColumn("trad_rectangularity", "Rectangularity", "trad_rectangularity", 4)
+        ]
+    }
+];
+
+const ALL_COLUMNS = COLUMN_GROUPS.flatMap(group => group.columns.map(column => ({ ...column, groupId: group.id })));
+let visibleColumnIds = new Set(ALL_COLUMNS.map(column => column.id));
+
+function visibleColumns() {
+    return ALL_COLUMNS.filter(column => visibleColumnIds.has(column.id));
+}
+
+function columnValue(column, item) {
+    try {
+        return column.get ? column.get(item.data || {}, item) : null;
+    } catch (err) {
+        return null;
+    }
+}
+
+function columnDigits(column, item) {
+    return typeof column.digits === "function" ? column.digits(item) : (column.digits ?? 1);
+}
+
+function renderColumnPicker() {
+    const menu = document.getElementById("column-menu");
+    if (!menu) return;
+
+    menu.innerHTML = COLUMN_GROUPS.map(group => `
+        <details class="column-group" open>
+            <summary>
+                <label>
+                    <input type="checkbox" class="column-group-checkbox" data-group-id="${group.id}">
+                    ${escapeHtml(group.label)}
+                </label>
+            </summary>
+            <div class="column-options">
+                ${group.columns.map(column => `
+                    <label class="column-option">
+                        <input type="checkbox" class="column-checkbox" data-column-id="${column.id}">
+                        ${escapeHtml(column.label)}
+                    </label>
+                `).join("")}
+            </div>
+        </details>
+    `).join("");
+
+    updateColumnPickerChecks();
+}
+
+function updateColumnPickerChecks() {
+    document.querySelectorAll(".column-checkbox").forEach(input => {
+        input.checked = visibleColumnIds.has(input.dataset.columnId);
+    });
+
+    document.querySelectorAll(".column-group-checkbox").forEach(input => {
+        const group = COLUMN_GROUPS.find(g => g.id === input.dataset.groupId);
+        const selectedCount = group.columns.filter(column => visibleColumnIds.has(column.id)).length;
+        input.checked = selectedCount === group.columns.length;
+        input.indeterminate = selectedCount > 0 && selectedCount < group.columns.length;
+    });
+}
+
+function syncVisibleOutputs() {
+    renderBulkTable();
+    rebuildHistograms(document.getElementById("histograms-container"));
+}
+
+function setupColumnControls() {
+    renderColumnPicker();
+
+    const button = document.getElementById("column-menu-button");
+    const panel = document.getElementById("column-menu-panel");
+    if (button && panel) {
+        button.addEventListener("click", () => {
+            panel.classList.toggle("open");
+            button.setAttribute("aria-expanded", panel.classList.contains("open") ? "true" : "false");
+        });
+        document.addEventListener("click", (event) => {
+            if (!panel.contains(event.target) && event.target !== button) {
+                panel.classList.remove("open");
+                button.setAttribute("aria-expanded", "false");
+            }
+        });
+    }
+
+    document.getElementById("column-menu")?.addEventListener("change", (event) => {
+        const target = event.target;
+        if (target.classList.contains("column-group-checkbox")) {
+            const group = COLUMN_GROUPS.find(g => g.id === target.dataset.groupId);
+            group.columns.forEach(column => {
+                if (target.checked) visibleColumnIds.add(column.id);
+                else visibleColumnIds.delete(column.id);
+            });
+        } else if (target.classList.contains("column-checkbox")) {
+            if (target.checked) visibleColumnIds.add(target.dataset.columnId);
+            else visibleColumnIds.delete(target.dataset.columnId);
+        }
+
+        updateColumnPickerChecks();
+        syncVisibleOutputs();
+    });
+}
+
+setupColumnControls();
+
 document.getElementById("single-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const file = document.getElementById("single-file").files[0];
@@ -254,17 +470,72 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
 
 let globalBatchResults = []; // Stores all row data for dynamic toggling
 
+function renderTableHeader() {
+    const table = document.getElementById("bulk-table");
+    const thead = table.querySelector("thead");
+    thead.innerHTML = `
+        <tr>
+            <th>Include</th>
+            <th>Filename</th>
+            ${visibleColumns().map(column => `<th>${escapeHtml(column.label)}</th>`).join("")}
+        </tr>
+    `;
+}
+
+function renderCell(column, item) {
+    if (column.html) {
+        return column.html(item);
+    }
+
+    const value = columnValue(column, item);
+    if (isNumber(value)) {
+        return escapeHtml(fmt(value, columnDigits(column, item)));
+    }
+    if (value === null || value === undefined || value === "") {
+        return `<span class="muted">N/A</span>`;
+    }
+    return escapeHtml(value);
+}
+
+function renderBulkTable() {
+    const table = document.getElementById("bulk-table");
+    const tbody = table.querySelector("tbody");
+    const columns = visibleColumns();
+
+    renderTableHeader();
+    tbody.innerHTML = "";
+
+    globalBatchResults.forEach((item, idx) => {
+        const tr = document.createElement("tr");
+        if (item.success) {
+            if (!item.included) tr.classList.add("excluded-row");
+            tr.innerHTML = `
+                <td><input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}"></td>
+                <td>${escapeHtml(item.data.filename || item.file_name)}
+                    ${item.notes ? `<span title="${escapeHtml(item.notes)}" style="display:inline-block; width:18px; height:18px; background:#ffc107; color:#000; border-radius:50%; text-align:center; line-height:18px; font-weight:bold; cursor:help; margin-left:5px; font-size:12px;">!</span>` : ""}
+                </td>
+                ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
+            `;
+        } else {
+            tr.innerHTML = `
+                <td>-</td>
+                <td>${escapeHtml(item.file_name)}</td>
+                <td colspan="${Math.max(columns.length, 1)}" style="color:red;">${escapeHtml(item.message)}</td>
+            `;
+        }
+        tbody.appendChild(tr);
+    });
+}
+
 document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const files = document.getElementById("bulk-files").files;
     const includeImages = document.getElementById("bulk-previews") ? document.getElementById("bulk-previews").checked : true;
     const status = document.getElementById("bulk-status");
     const table = document.getElementById("bulk-table");
-    const tbody = table.querySelector("tbody");
     const chartsContainer = document.getElementById("histograms-container");
     const downloadBtn = document.getElementById("download-csv-btn");
 
-    tbody.innerHTML = "";
     chartsContainer.innerHTML = "";
     table.style.display = "table";
     document.getElementById("bulk-section").classList.add("bulk-card");
@@ -272,6 +543,7 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
 
     // Reset global state
     globalBatchResults = [];
+    renderBulkTable();
     let completed = 0, successCount = 0, failureCount = 0, pixelScaleCount = 0;
     
     // --- RESTORED TIMER INITIALIZATION ---
@@ -304,7 +576,6 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
 
         try {
             const data = await postBulkImage(files[i], includeImages);
-            const tr = document.createElement("tr");
 
             if (data.success) {
                 successCount++;
@@ -313,62 +584,20 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
                 const notes = rowNotes(data);
                 if (!isCm) pixelScaleCount++;
 
-                // Store raw data in global array (Default to included: true)
-                globalBatchResults.push({ file_name: files[i].name, data: data, included: true, isCm: isCm, digits: digits, notes: notes });
-                const idx = globalBatchResults.length - 1;
-
-                let rw=isCm?data.raw_width:null, sw=isCm?data.sm_width:null;
-                let rh=isCm?data.raw_height:null, sh=isCm?data.sm_height:null;
-                let rp=isCm?data.raw_perimeter:null, sp=isCm?data.sm_perimeter:null;
-                let rfw=isCm?data.raw_flesh_width:null, sfw=isCm?data.sm_flesh_width:null;
-                let rfh=isCm?data.raw_flesh_height:null, sfh=isCm?data.sm_flesh_height:null;
-                let rfp=isCm?data.raw_flesh_perimeter:null, sfp=isCm?data.sm_flesh_perimeter:null;
-                let rrt=isCm?data.raw_rind_thick:null, srt=isCm?data.sm_rind_thick:null;
-                let ra=isCm?data.raw_total_area:null, sa=isCm?data.sm_total_area:null;
-                let rfa=isCm?data.raw_flesh_area:null, sfa=isCm?data.sm_flesh_area:null;
-
-                tr.innerHTML = `
-                    <td><input type="checkbox" checked class="toggle-checkbox" data-idx="${idx}"></td>
-                    <td>${escapeHtml(data.filename || files[i].name)}
-                        ${notes ? `<span title="${escapeHtml(notes)}" style="display:inline-block; width:18px; height:18px; background:#ffc107; color:#000; border-radius:50%; text-align:center; line-height:18px; font-weight:bold; cursor:help; margin-left:5px; font-size:12px;">!</span>` : ""}
-                    </td>
-                    <td>${fmt(data.r2_rind, 4)}</td>
-                    <td>${fmt(data.r2_flesh, 4)}</td>
-                    <td>${fmt(rw, digits)}</td><td>${fmt(sw, digits)}</td>
-                    <td>${fmt(rh, digits)}</td><td>${fmt(sh, digits)}</td>
-                    <td>${fmt(rp, digits)}</td><td>${fmt(sp, digits)}</td>
-                    <td>${fmt(rfw, digits)}</td><td>${fmt(sfw, digits)}</td>
-                    <td>${fmt(rfh, digits)}</td><td>${fmt(sfh, digits)}</td>
-                    <td>${fmt(rfp, digits)}</td><td>${fmt(sfp, digits)}</td>
-                    <td>${fmt(rrt, digits)}</td><td>${fmt(srt, digits)}</td>
-                    <td>${fmt(data.raw_rind_ratio, 3)}</td><td>${fmt(data.sm_rind_ratio, 3)}</td>
-                    <td>${fmt(ra, digits)}</td><td>${fmt(sa, digits)}</td>
-                    <td>${fmt(rfa, digits)}</td><td>${fmt(sfa, digits)}</td>
-                    <td>${fmt(data.raw_flesh_ratio, 3)}</td><td>${fmt(data.sm_flesh_ratio, 3)}</td>
-                    <td>${fmt(data.raw_elongation, 3)}</td><td>${fmt(data.sm_elongation, 3)}</td>
-                    <td>${fmt(data.raw_asym, 3)}</td><td>${fmt(data.sm_asym, 3)}</td>
-                    <td>${fmt(data.raw_flesh_asym, 3)}</td><td>${fmt(data.sm_flesh_asym, 3)}</td>
-                    <td>${fmt(data.raw_circ, 3)}</td><td>${fmt(data.sm_circ, 3)}</td>
-                    <td>${fmt(data.midline_curvature, 4)}</td>
-                    <td>${fmt(data.delta_e_initial, 2)}</td><td>${fmt(data.delta_e_final, 2)}</td>
-                    <td>${isNumber(data.processing_ms) ? data.processing_ms : "N/A"}</td>
-                    <td>${data.image_raw_base64 ? `<img src="data:image/jpeg;base64,${data.image_raw_base64}" class="thumb preview-img">` : `<span class="muted">-</span>`}</td>
-                    <td>${data.image_sm_base64 ? `<img src="data:image/jpeg;base64,${data.image_sm_base64}" class="thumb preview-img">` : `<span class="muted">-</span>`}</td>
-                `;
+                globalBatchResults.push({ file_name: files[i].name, data, included: true, isCm, digits, notes, success: true });
             } else {
                 failureCount++;
-                tr.innerHTML = `<td>-</td><td>${escapeHtml(files[i].name)}</td><td colspan="36" style="color:red;">Error: ${escapeHtml(data.message)}</td>`;
+                globalBatchResults.push({ file_name: files[i].name, success: false, message: `Error: ${data.message || "Unknown error"}` });
             }
-            tbody.appendChild(tr);
         } catch (err) {
             failureCount++;
-            const tr = document.createElement("tr");
             const msg = err.message === BULK_TIMEOUT_MESSAGE ? BULK_TIMEOUT_MESSAGE : `API Error: ${err.message}`;
-            tr.innerHTML = `<td>-</td><td>${escapeHtml(files[i].name)}</td><td colspan="36" style="color:red;">${escapeHtml(msg)}</td>`;
-            tbody.appendChild(tr);
+            globalBatchResults.push({ file_name: files[i].name, success: false, message: msg });
         }
 
         completed++;
+        renderBulkTable();
+        rebuildHistograms(chartsContainer);
         if (i < files.length - 1) await new Promise(r => setTimeout(r, 500));
     }
 
@@ -413,86 +642,27 @@ document.querySelector("#bulk-table tbody").addEventListener("change", (e) => {
 // --- DYNAMIC HISTOGRAM BUILDER ---
 function rebuildHistograms(container) {
     container.innerHTML = ""; // Clear old charts
-    
-    const batchData = {
-        "Width - Raw (cm)":[], "Width - Sm (cm)": [],
-        "Height - Raw (cm)":[], "Height - Sm (cm)": [],
-        "Perim - Raw (cm)":[], "Perim - Sm (cm)": [],
-        "F.Width - Raw (cm)":[], "F.Width - Sm (cm)": [],
-        "F.Height - Raw (cm)":[], "F.Height - Sm (cm)": [],
-        "F.Perim - Raw (cm)":[], "F.Perim - Sm (cm)": [],
-        "Rind Thick - Raw (cm)":[], "Rind Thick - Sm (cm)": [],
-        "Rind Ratio - Raw": [], "Rind Ratio - Sm":[],
-        "Total Area - Raw (cm²)": [], "Total Area - Sm (cm²)":[],
-        "Flesh Area - Raw (cm²)": [], "Flesh Area - Sm (cm²)":[],
-        "Flesh Ratio - Raw": [], "Flesh Ratio - Sm": [],
-        "Elongation - Raw":[], "Elongation - Sm": [],
-        "Asymmetry - Raw": [], "Asymmetry - Sm":[],
-        "Flesh Asym - Raw": [], "Flesh Asym - Sm":[],
-        "Circularity - Raw": [], "Circularity - Sm": [],
-        "Midline Curve": [], "R² Rind":[], "R² Flesh": [],
-        "Initial ΔE": [], "Final ΔE":[], "Time (ms)": [] // <--- Time added here!
-    };
+    if (globalBatchResults.length === 0) return;
+
+    const histogramColumns = visibleColumns().filter(column => column.histogram !== false);
+    const batchData = Object.fromEntries(histogramColumns.map(column => [column.histLabel || column.label, []]));
 
     // Only pull data from rows that are checked (included: true)
     globalBatchResults.forEach(item => {
-        if (!item.included || !item.data.success) return;
-        const d = item.data;
-        const isCm = item.isCm;
-
-        let rw=isCm?d.raw_width:null, sw=isCm?d.sm_width:null;
-        let rh=isCm?d.raw_height:null, sh=isCm?d.sm_height:null;
-        let rp=isCm?d.raw_perimeter:null, sp=isCm?d.sm_perimeter:null;
-        let rfw=isCm?d.raw_flesh_width:null, sfw=isCm?d.sm_flesh_width:null;
-        let rfh=isCm?d.raw_flesh_height:null, sfh=isCm?d.sm_flesh_height:null;
-        let rfp=isCm?d.raw_flesh_perimeter:null, sfp=isCm?d.sm_flesh_perimeter:null;
-        let rrt=isCm?d.raw_rind_thick:null, srt=isCm?d.sm_rind_thick:null;
-        let ra=isCm?d.raw_total_area:null, sa=isCm?d.sm_total_area:null;
-        let rfa=isCm?d.raw_flesh_area:null, sfa=isCm?d.sm_flesh_area:null;
-
-        if(isNumber(rw)) batchData["Width - Raw (cm)"].push(rw);
-        if(isNumber(sw)) batchData["Width - Sm (cm)"].push(sw);
-        if(isNumber(rh)) batchData["Height - Raw (cm)"].push(rh);
-        if(isNumber(sh)) batchData["Height - Sm (cm)"].push(sh);
-        if(isNumber(rp)) batchData["Perim - Raw (cm)"].push(rp);
-        if(isNumber(sp)) batchData["Perim - Sm (cm)"].push(sp);
-        if(isNumber(rfw)) batchData["F.Width - Raw (cm)"].push(rfw);
-        if(isNumber(sfw)) batchData["F.Width - Sm (cm)"].push(sfw);
-        if(isNumber(rfh)) batchData["F.Height - Raw (cm)"].push(rfh);
-        if(isNumber(sfh)) batchData["F.Height - Sm (cm)"].push(sfh);
-        if(isNumber(rfp)) batchData["F.Perim - Raw (cm)"].push(rfp);
-        if(isNumber(sfp)) batchData["F.Perim - Sm (cm)"].push(sfp);
-        if(isNumber(rrt)) batchData["Rind Thick - Raw (cm)"].push(rrt);
-        if(isNumber(srt)) batchData["Rind Thick - Sm (cm)"].push(srt);
-        if(isNumber(d.raw_rind_ratio)) batchData["Rind Ratio - Raw"].push(d.raw_rind_ratio);
-        if(isNumber(d.sm_rind_ratio)) batchData["Rind Ratio - Sm"].push(d.sm_rind_ratio);
-        if(isNumber(ra)) batchData["Total Area - Raw (cm²)"].push(ra);
-        if(isNumber(sa)) batchData["Total Area - Sm (cm²)"].push(sa);
-        if(isNumber(rfa)) batchData["Flesh Area - Raw (cm²)"].push(rfa);
-        if(isNumber(sfa)) batchData["Flesh Area - Sm (cm²)"].push(sfa);
-        if(isNumber(d.raw_flesh_ratio)) batchData["Flesh Ratio - Raw"].push(d.raw_flesh_ratio);
-        if(isNumber(d.sm_flesh_ratio)) batchData["Flesh Ratio - Sm"].push(d.sm_flesh_ratio);
-        if(isNumber(d.raw_elongation)) batchData["Elongation - Raw"].push(d.raw_elongation);
-        if(isNumber(d.sm_elongation)) batchData["Elongation - Sm"].push(d.sm_elongation);
-        if(isNumber(d.raw_asym)) batchData["Asymmetry - Raw"].push(d.raw_asym);
-        if(isNumber(d.sm_asym)) batchData["Asymmetry - Sm"].push(d.sm_asym);
-        if(isNumber(d.raw_flesh_asym)) batchData["Flesh Asym - Raw"].push(d.raw_flesh_asym);
-        if(isNumber(d.sm_flesh_asym)) batchData["Flesh Asym - Sm"].push(d.sm_flesh_asym);
-        if(isNumber(d.raw_circ)) batchData["Circularity - Raw"].push(d.raw_circ);
-        if(isNumber(d.sm_circ)) batchData["Circularity - Sm"].push(d.sm_circ);
-        if(isNumber(d.midline_curvature)) batchData["Midline Curve"].push(d.midline_curvature);
-        if(isNumber(d.r2_rind)) batchData["R² Rind"].push(d.r2_rind);
-        if(isNumber(d.r2_flesh)) batchData["R² Flesh"].push(d.r2_flesh);
-        if(isNumber(d.delta_e_initial)) batchData["Initial ΔE"].push(d.delta_e_initial);
-        if(isNumber(d.delta_e_final)) batchData["Final ΔE"].push(d.delta_e_final);
-        if(isNumber(d.processing_ms)) batchData["Time (ms)"].push(d.processing_ms);
+        if (!item.included || !item.success) return;
+        histogramColumns.forEach(column => {
+            const value = columnValue(column, item);
+            if (isNumber(value)) {
+                batchData[column.histLabel || column.label].push(value);
+            }
+        });
     });
 
     drawHistograms(batchData, container);
 }
 
 function drawHistograms(batchData, container) {
-    const deKeys = ["Initial ΔE", "Final ΔE"];
+    const deKeys = Object.keys(batchData).filter(k => k.includes("ΔE"));
     let allDE =[];
     deKeys.forEach(k => {
         if (batchData[k]) allDE.push(...batchData[k].filter(isNumber));
@@ -508,7 +678,7 @@ function drawHistograms(batchData, container) {
         const pad = (deMax - deMin) * 0.02;
         deMin -= pad; deMax += pad;
 
-        deNumBins = Math.max(8, Math.min(20, Math.ceil(Math.sqrt(batchData["Initial ΔE"].length || 1))));
+        deNumBins = Math.max(8, Math.min(20, Math.ceil(Math.sqrt(allDE.length || 1))));
         deBinWidth = (deMax - deMin) / deNumBins || 1;
 
         let maxCount = 0;
@@ -603,8 +773,27 @@ function drawHistograms(batchData, container) {
 }
 
 // --- CSV DOWNLOAD HANDLER ---
+function csvEscape(value) {
+    const text = value === null || value === undefined ? "" : String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
 document.getElementById("download-csv-btn").addEventListener("click", () => {
-    const csvString = globalCsvData.join("\n");
+    const columns = visibleColumns().filter(column => column.csv !== false);
+    const header = ["Filename", ...columns.map(column => column.csvLabel || column.label)];
+    const rows = [header.map(csvEscape).join(",")];
+
+    globalBatchResults.forEach(item => {
+        if (!item.success || !item.included) return;
+        const values = [item.data.filename || item.file_name];
+        columns.forEach(column => {
+            const value = columnValue(column, item);
+            values.push(isNumber(value) ? value : (value || ""));
+        });
+        rows.push(values.map(csvEscape).join(","));
+    });
+
+    const csvString = rows.join("\n");
     const blob = new Blob([csvString], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     
