@@ -516,24 +516,12 @@ function renderSingleAnalysis(data, previewIds = []) {
         success: true
     };
 
-    let scaleDetail = `Measurements are in ${escapeHtml(measurementUnit(data))}.`;
-    if (data.delta_e_initial !== null && data.delta_e_initial !== undefined && data.delta_e_final !== null && data.delta_e_final !== undefined) {
-        scaleDetail = `Delta E: ${fmt(data.delta_e_initial, 2)} to ${fmt(data.delta_e_final, 2)}.`;
-    } else if (!data.color_checker_found) {
-        scaleDetail = "ColorChecker not found; dimensions are original-image pixels.";
-    }
-
     const metricCards = COLUMN_GROUPS
         .filter(group => group.id !== "previews")
         .map(group => renderSingleMetricGroups(group, item))
         .join("");
 
     return `
-        <div class="result-card single-summary-card">
-            <h3>Run Summary</h3>
-            <p>${scaleDetail}</p>
-            ${item.notes ? `<p><strong>Notes:</strong> ${escapeHtml(item.notes)}</p>` : ""}
-        </div>
         ${metricCards}
         ${renderSinglePreviewCards(data, previewIds)}
     `;
