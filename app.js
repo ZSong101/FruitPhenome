@@ -2,12 +2,37 @@
 //let API_URL = "https://crabbly-watermelonphenotyping.hf.space/process_single";
 let API_URL = "https://fruit-proxy-cv71.onrender.com/proxy_process";
 const SINGLE_REQUEST_TIMEOUT_MS = 120000; // 2 minutes
-const BULK_REQUEST_TIMEOUT_MS = 30000;    // Increased to 30 seconds to prevent premature drops
-const BULK_TIMEOUT_MESSAGE = "Taking longer than 30 seconds. Moving on.";
+const BULK_REQUEST_TIMEOUT_MS = 40000;
+const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
 const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621315d0";
 
 let currentPassword = ""; // Stores the password in memory after a successful login
 let currentUsername = ""; // Stores user identity
+
+function setLastUpdatedStamp() {
+    const stamp = document.getElementById("last-updated-stamp");
+    if (!stamp) return;
+
+    const modified = new Date(document.lastModified);
+    if (Number.isNaN(modified.getTime())) {
+        stamp.innerText = "Last updated: unavailable";
+        return;
+    }
+
+    const date = new Intl.DateTimeFormat("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric"
+    }).format(modified);
+    const time = new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short"
+    }).format(modified);
+    stamp.innerText = `Last updated: ${date} at ${time}`;
+}
+
+setLastUpdatedStamp();
 
 async function sha256(message) {
     const msgBuffer = new TextEncoder().encode(message);
