@@ -72,6 +72,26 @@ button:hover {
   font-size: 1rem;
 }
 
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e6edf2;
+  padding: 5px 0;
+}
+
+.metric-row:last-child {
+  border-bottom: 0;
+}
+
+.metric-row span {
+  color: #4a5963;
+}
+
+.metric-row strong {
+  text-align: right;
+}
+
 .result-card .score {
   font-weight: 600;
 }
@@ -81,4 +101,25 @@ button:hover {
   margin-top: 8px;
   border-radius: 8px;
   border: 1px solid #ccd8df;
+}
+
+.single-preview-card {
+  grid-column: span 2;
+}
+
+.single-preview-img {
+  max-width: 100%;
+}
+
+.app-footer {
+  color: #5f6f7a;
+  font-size: 13px;
+  text-align: center;
+  padding: 8px 24px 28px;
+}
+
+@media (max-width: 760px) {
+  .single-preview-card {
+    grid-column: span 1;
+  }
 }

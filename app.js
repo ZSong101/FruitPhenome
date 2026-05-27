@@ -44,8 +44,11 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     }
 });
 
-function processUrl(includeImage) {
-    return `${API_URL}?include_image=${includeImage ? "true" : "false"}`;
+function processUrl(previewIds = []) {
+    const params = new URLSearchParams();
+    params.set("include_image", previewIds.length > 0 ? "true" : "false");
+    if (previewIds.length > 0) params.set("preview_types", previewIds.join(","));
+    return `${API_URL}?${params.toString()}`;
 }
 
 function escapeHtml(value) {
@@ -82,7 +85,7 @@ function rowNotes(data) {
     return notes.join(" | ");
 }
 
-async function postImage(file, includeImage, timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1) {
+async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1) {
     const formData = new FormData();
     formData.append("password", currentPassword);
     formData.append("username", currentUsername); 
@@ -94,7 +97,7 @@ async function postImage(file, includeImage, timeoutMs = SINGLE_REQUEST_TIMEOUT_
 
         try {
             // Strict timeout wrapper
-            const fetchPromise = fetch(processUrl(includeImage), {
+            const fetchPromise = fetch(processUrl(previewIds), {
                 method: "POST",
                 body: formData,
                 signal: controller.signal
@@ -143,9 +146,9 @@ async function postImage(file, includeImage, timeoutMs = SINGLE_REQUEST_TIMEOUT_
     }
 }
 
-async function postBulkImage(file, includeImage) {
+async function postBulkImage(file, previewIds) {
     // 30 second timeout, 1 automatic retry if the server drops the connection
-    return postImage(file, includeImage, BULK_REQUEST_TIMEOUT_MS, 1);
+    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 1);
 }
 
 function previewCell(data) {
@@ -176,7 +179,7 @@ function metricColumn(id, label, field, digits = 3, options = {}) {
 function cmMetricColumn(id, label, field, digits = (item) => item.digits, options = {}) {
     return metricColumn(id, label, field, digits, {
         ...options,
-        get: (data, item) => item.isCm ? valueOrNull(data[field]) : null
+        get: (data, item) => (item.isCm || item.allowPixelMetrics) ? valueOrNull(data[field]) : null
     });
 }
 
@@ -352,8 +355,8 @@ function visiblePreviewColumns() {
     return visibleColumns().filter(column => column.id.startsWith("image_"));
 }
 
-function shouldRequestPreviews() {
-    return visiblePreviewColumns().length > 0;
+function selectedPreviewIds() {
+    return visiblePreviewColumns().map(column => column.id);
 }
 
 function columnValue(column, item) {
@@ -456,6 +459,86 @@ function setupColumnControls() {
 
 setupColumnControls();
 
+function renderSingleMetricCard(title, columns, item) {
+    const metricColumns = columns.filter(column => !column.html);
+    if (metricColumns.length === 0) return "";
+
+    return `
+        <div class="result-card">
+            <h3>${escapeHtml(title)}</h3>
+            ${metricColumns.map(column => `
+                <div class="metric-row">
+                    <span>${escapeHtml(column.label)}</span>
+                    <strong>${renderCell(column, item)}</strong>
+                </div>
+            `).join("")}
+        </div>
+    `;
+}
+
+function renderSingleMetricGroups(group, item, ancestry = []) {
+    const title = [...ancestry, group.label].join(" / ");
+    const ownCard = group.columns ? renderSingleMetricCard(title, group.columns, item) : "";
+    const childCards = (group.children || []).map(child => renderSingleMetricGroups(child, item, [...ancestry, group.label])).join("");
+    return ownCard + childCards;
+}
+
+function renderSinglePreviewCards(data, previewIds) {
+    const previewGroup = COLUMN_GROUP_MAP.get("previews");
+    const previews = previewGroup
+        ? columnsForGroup(previewGroup).filter(column => previewIds.includes(column.id))
+        : [];
+    if (previews.length === 0) return "";
+
+    return previews.map(column => {
+        const imageData = data[column.id];
+        return `
+            <div class="result-card single-preview-card">
+                <h3>${escapeHtml(column.label)}</h3>
+                ${imageData
+                    ? `<img src="data:image/jpeg;base64,${imageData}" class="preview-img single-preview-img">`
+                    : `<span class="muted">Preview unavailable</span>`}
+            </div>
+        `;
+    }).join("");
+}
+
+function renderSingleAnalysis(data, previewIds = []) {
+    const isCm = measurementUnit(data) === "cm";
+    const item = {
+        file_name: data.filename || "",
+        data,
+        included: true,
+        isCm,
+        allowPixelMetrics: true,
+        digits: isCm ? 2 : 0,
+        notes: rowNotes(data),
+        success: true
+    };
+
+    let scaleDetail = `Measurements are in ${escapeHtml(measurementUnit(data))}.`;
+    if (data.delta_e_initial !== null && data.delta_e_initial !== undefined && data.delta_e_final !== null && data.delta_e_final !== undefined) {
+        scaleDetail = `Delta E: ${fmt(data.delta_e_initial, 2)} to ${fmt(data.delta_e_final, 2)}.`;
+    } else if (!data.color_checker_found) {
+        scaleDetail = "ColorChecker not found; dimensions are original-image pixels.";
+    }
+
+    const metricCards = COLUMN_GROUPS
+        .filter(group => group.id !== "previews")
+        .map(group => renderSingleMetricGroups(group, item))
+        .join("");
+
+    return `
+        <div class="result-card single-summary-card">
+            <h3>Run Summary</h3>
+            <p>${scaleDetail}</p>
+            ${item.notes ? `<p><strong>Notes:</strong> ${escapeHtml(item.notes)}</p>` : ""}
+        </div>
+        ${metricCards}
+        ${renderSinglePreviewCards(data, previewIds)}
+    `;
+}
+
 document.getElementById("single-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const file = document.getElementById("single-file").files[0];
@@ -466,13 +549,10 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
     resultDiv.innerHTML = "";
 
     try {
-        const data = await postImage(file, true, SINGLE_REQUEST_TIMEOUT_MS, 0);  // No retries for single images
+        const requestedPreviewIds = selectedPreviewIds();
+        const data = await postImage(file, requestedPreviewIds, SINGLE_REQUEST_TIMEOUT_MS, 0);  // No retries for single images
         
         if (data.success) {
-            const unit = measurementUnit(data);
-            const aUnit = areaUnit(data);
-            const digits = unit === "cm" ? 2 : 0;
-            const notes = rowNotes(data);
             status.innerText = "Success";
 
             // Send event to Google Analytics
@@ -484,65 +564,7 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
                 });
             }
 
-            let scaleText = `<p><strong>Scale:</strong> Measurements are in ${escapeHtml(unit)}.</p>`;
-            if (data.delta_e_initial !== null && data.delta_e_final !== null) {
-                scaleText = `<p><strong>Delta E:</strong> ${fmt(data.delta_e_initial, 2)} to ${fmt(data.delta_e_final, 2)}</p>`;
-            } else if (!data.color_checker_found) {
-                scaleText = `<p><strong>Scale:</strong> ColorChecker not found; dimensions are original-image pixels.</p>`;
-            }
-
-            resultDiv.innerHTML = `
-                <div style="display:flex; gap: 20px; text-align: left; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 200px;">
-                        <h3>Raw Features</h3>
-                        <p><strong>Width:</strong> ${fmt(data.raw_width, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>Height:</strong> ${fmt(data.raw_height, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>Perimeter:</strong> ${fmt(data.raw_perimeter, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>F.Width:</strong> ${fmt(data.raw_flesh_width, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>F.Height:</strong> ${fmt(data.raw_flesh_height, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>F.Perim:</strong> ${fmt(data.raw_flesh_perimeter, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>Rind Thick.:</strong> ${fmt(data.raw_rind_thick, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>Rind Ratio:</strong> ${fmt(data.raw_rind_ratio, 3)}</p>
-                        <p><strong>Total Area:</strong> ${fmt(data.raw_total_area, digits)} ${escapeHtml(aUnit)}</p>
-                        <p><strong>Flesh Area:</strong> ${fmt(data.raw_flesh_area, digits)} ${escapeHtml(aUnit)}</p>
-                        <p><strong>Flesh/Total:</strong> ${fmt(data.raw_flesh_ratio, 3)}</p>
-                        <p><strong>Elongation:</strong> ${fmt(data.raw_elongation, 3)}</p>
-                        <p><strong>Asymmetry:</strong> ${fmt(data.raw_asym, 3)}</p>
-                        <p><strong>Flesh Asym:</strong> ${fmt(data.raw_flesh_asym, 3)}</p>
-                        <p><strong>Circularity:</strong> ${fmt(data.raw_circ, 3)}</p>
-                        <br>
-                        ${data.image_raw_base64 ? `<img src="data:image/jpeg;base64,${data.image_raw_base64}" class="preview-img" style="width:100%; border-radius:8px; cursor:pointer;">` : ""}
-                    </div>
-                    <div style="flex: 1; min-width: 200px;">
-                        <h3>Smoothed Features</h3>
-                        <p><strong>R² Rind:</strong> ${fmt(data.r2_rind, 4)}</p>
-                        <p><strong>R² Flesh:</strong> ${fmt(data.r2_flesh, 4)}</p>
-                        <p><strong>Width:</strong> ${fmt(data.sm_width, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>Height:</strong> ${fmt(data.sm_height, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>Perimeter:</strong> ${fmt(data.sm_perimeter, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>F.Width:</strong> ${fmt(data.sm_flesh_width, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>F.Height:</strong> ${fmt(data.sm_flesh_height, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>F.Perim:</strong> ${fmt(data.sm_flesh_perimeter, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>Rind Thick.:</strong> ${fmt(data.sm_rind_thick, digits)} ${escapeHtml(unit)}</p>
-                        <p><strong>Rind Ratio:</strong> ${fmt(data.sm_rind_ratio, 3)}</p>
-                        <p><strong>Total Area:</strong> ${fmt(data.sm_total_area, digits)} ${escapeHtml(aUnit)}</p>
-                        <p><strong>Flesh Area:</strong> ${fmt(data.sm_flesh_area, digits)} ${escapeHtml(aUnit)}</p>
-                        <p><strong>Flesh/Total:</strong> ${fmt(data.sm_flesh_ratio, 3)}</p>
-                        <p><strong>Elongation:</strong> ${fmt(data.sm_elongation, 3)}</p>
-                        <p><strong>Asymmetry:</strong> ${fmt(data.sm_asym, 3)}</p>
-                        <p><strong>Flesh Asym:</strong> ${fmt(data.sm_flesh_asym, 3)}</p>
-                        <p><strong>Circularity:</strong> ${fmt(data.sm_circ, 3)}</p>
-                        <br>
-                        ${data.image_sm_base64 ? `<img src="data:image/jpeg;base64,${data.image_sm_base64}" class="preview-img" style="width:100%; border-radius:8px; cursor:pointer;">` : ""}
-                    </div>
-                </div>
-                <div style="margin-top: 15px;">
-                    <p><strong>Midline Curve:</strong> ${fmt(data.midline_curvature, 4)}</p>
-                    ${scaleText}
-                    ${notes ? `<p><strong>Notes:</strong> ${escapeHtml(notes)}</p>` : ""}
-                    ${isNumber(data.processing_ms) ? `<p><strong>Time:</strong> ${data.processing_ms} ms</p>` : ""}
-                </div>
-            `;
+            resultDiv.innerHTML = renderSingleAnalysis(data, requestedPreviewIds);
         } else {
             const notes = rowNotes(data);
             status.innerText = `Error: ${data.message}`;
@@ -659,7 +681,7 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
         status.innerText = `Processing image ${i + 1} of ${files.length}...`;
 
         try {
-            const data = await postBulkImage(files[i], shouldRequestPreviews());
+            const data = await postBulkImage(files[i], selectedPreviewIds());
 
             if (data.success) {
                 successCount++;
