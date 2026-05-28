@@ -351,6 +351,7 @@ const COLUMN_GROUPS = [
                 id: "previews_standard",
                 label: "Standard Previews",
                 columns: [
+                    previewColumn("image_line_ocr_base64", "Preview (OCR)", "image_line_ocr_base64"),
                     previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
                     previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
                     previewColumn("image_cleanup_hybrid_base64", "Preview (Cleanup)", "image_cleanup_hybrid_base64"),
@@ -364,6 +365,7 @@ const COLUMN_GROUPS = [
         id: "run_info",
         label: "Run Info",
         columns: [
+            metricColumn("line", "Line", "line", 0, { histogram: false }),
             metricColumn("processing_ms", "Time (ms)", "processing_ms", 0)
         ]
     }
