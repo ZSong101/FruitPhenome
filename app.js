@@ -600,9 +600,53 @@ function updateColumnPickerChecks() {
     });
 }
 
-function syncVisibleOutputs() {
+function captureBatchScrollAnchor() {
+    const table = document.getElementById("bulk-table");
+    if (!table || table.style.display === "none") return { active: false };
+
+    const doc = document.documentElement;
+    const scrollHeight = Math.max(doc.scrollHeight, document.body.scrollHeight);
+    const viewportBottom = window.scrollY + window.innerHeight;
+    const tableRect = table.getBoundingClientRect();
+    const tableTop = window.scrollY + tableRect.top;
+    const tableBottom = window.scrollY + tableRect.bottom;
+    const aboveTable = window.scrollY < tableTop - 20;
+    const nearPageBottom = scrollHeight - viewportBottom < 120;
+    const alreadyBelowTable = window.scrollY > tableBottom - 20;
+
+    return {
+        active: aboveTable || nearPageBottom || alreadyBelowTable,
+        mode: aboveTable ? "fixed" : "bottom",
+        scrollY: window.scrollY,
+        scrollHeight
+    };
+}
+
+function restoreBatchScrollAnchor(anchor) {
+    if (!anchor?.active) return;
+    requestAnimationFrame(() => {
+        if (anchor.mode === "fixed") {
+            window.scrollTo({ top: anchor.scrollY, behavior: "auto" });
+            return;
+        }
+        const doc = document.documentElement;
+        const nextScrollHeight = Math.max(doc.scrollHeight, document.body.scrollHeight);
+        const heightDelta = nextScrollHeight - anchor.scrollHeight;
+        if (heightDelta !== 0) {
+            window.scrollTo({ top: Math.max(0, anchor.scrollY + heightDelta), behavior: "auto" });
+        }
+    });
+}
+
+function refreshBatchOutputs(chartsContainer) {
+    const anchor = captureBatchScrollAnchor();
     renderBulkTable();
-    rebuildHistograms(document.getElementById("histograms-container"));
+    rebuildHistograms(chartsContainer || document.getElementById("histograms-container"));
+    restoreBatchScrollAnchor(anchor);
+}
+
+function syncVisibleOutputs() {
+    refreshBatchOutputs(document.getElementById("histograms-container"));
     renderCurrentSingleAnalysis();
 }
 
@@ -1038,8 +1082,7 @@ async function runBatch(batch) {
 
         batch.completed++;
         batch.nextIndex = index + 1;
-        renderBulkTable();
-        rebuildHistograms(chartsContainer);
+        refreshBatchOutputs(chartsContainer);
 
         if (batch.nextIndex < batch.files.length) {
             await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
