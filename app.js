@@ -353,15 +353,9 @@ const COLUMN_GROUPS = [
                 columns: [
                     previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
                     previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
+                    previewColumn("image_cleanup_hybrid_base64", "Preview (Cleanup)", "image_cleanup_hybrid_base64"),
                     previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64"),
                     previewColumn("image_traditional_base64", "Preview (Traditional)", "image_traditional_base64")
-                ]
-            },
-            {
-                id: "previews_cleanup",
-                label: "Mask Cleanup",
-                columns: [
-                    previewColumn("image_cleanup_hybrid_base64", "Preview (Hybrid Cleanup)", "image_cleanup_hybrid_base64")
                 ]
             }
         ]
