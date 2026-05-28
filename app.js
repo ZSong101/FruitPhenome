@@ -111,15 +111,19 @@ function rowNotes(data) {
     return notes.join(" | ");
 }
 
-async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1) {
+async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null) {
     const formData = new FormData();
     formData.append("password", currentPassword);
     formData.append("username", currentUsername); 
     formData.append("file", file);
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (externalSignal?.aborted) throw new Error("Batch stopped");
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        const abortFromExternal = () => controller.abort();
+        externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
 
         try {
             // Strict timeout wrapper
@@ -154,6 +158,11 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
 
         } catch (err) {
             clearTimeout(timeoutId);
+            externalSignal?.removeEventListener("abort", abortFromExternal);
+
+            if (externalSignal?.aborted) {
+                throw new Error("Batch stopped");
+            }
             
             const isTimeout = err.name === "AbortError" || err.message === "Timeout";
             
@@ -168,13 +177,16 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
             // Otherwise, wait 2 seconds and retry
             console.warn(`Attempt ${attempt + 1} failed for ${file.name}. Retrying...`);
             await new Promise(r => setTimeout(r, 2000));
+        } finally {
+            clearTimeout(timeoutId);
+            externalSignal?.removeEventListener("abort", abortFromExternal);
         }
     }
 }
 
-async function postBulkImage(file, previewIds) {
-    // 30 second timeout, 1 automatic retry if the server drops the connection
-    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 1);
+async function postBulkImage(file, previewIds, externalSignal = null) {
+    // 40 second timeout, 1 automatic retry if the server drops the connection
+    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 1, externalSignal);
 }
 
 function previewCell(data) {
@@ -347,11 +359,8 @@ const COLUMN_GROUPS = [
             },
             {
                 id: "previews_cleanup",
-                label: "Mask Cleanup Comparison",
+                label: "Mask Cleanup",
                 columns: [
-                    previewColumn("image_cleanup_morph_base64", "Preview (Morph Cleanup)", "image_cleanup_morph_base64"),
-                    previewColumn("image_cleanup_blur_base64", "Preview (Blur Cleanup)", "image_cleanup_blur_base64"),
-                    previewColumn("image_cleanup_contour_base64", "Preview (Contour Cleanup)", "image_cleanup_contour_base64"),
                     previewColumn("image_cleanup_hybrid_base64", "Preview (Hybrid Cleanup)", "image_cleanup_hybrid_base64")
                 ]
             }
@@ -606,6 +615,154 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
 });
 
 let globalBatchResults = []; // Stores all row data for dynamic toggling
+let activeBatch = null;
+let batchRunCounter = 0;
+const BATCH_PAUSE_MS = 500;
+
+function formatDuration(ms) {
+    const elapsedSec = Math.floor(ms / 1000);
+    const m = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+    const s = String(elapsedSec % 60).padStart(2, '0');
+    return `${m}:${s}`;
+}
+
+function makeBatchState(files) {
+    return {
+        id: ++batchRunCounter,
+        files: Array.from(files),
+        nextIndex: 0,
+        completed: 0,
+        successCount: 0,
+        failureCount: 0,
+        pixelScaleCount: 0,
+        elapsedMs: 0,
+        runStartedAt: null,
+        timerInterval: null,
+        abortController: null,
+        running: false,
+        finished: false,
+        stopRequested: false,
+        stopReason: null
+    };
+}
+
+function isActiveBatch(batch) {
+    return activeBatch && batch && activeBatch.id === batch.id;
+}
+
+function batchElapsedMs(batch) {
+    if (!batch) return 0;
+    const runningMs = batch.running && batch.runStartedAt ? Date.now() - batch.runStartedAt : 0;
+    return batch.elapsedMs + runningMs;
+}
+
+function updateBatchTimer(batch) {
+    const timerDiv = document.getElementById("batch-timer");
+    if (!timerDiv || !batch) return;
+
+    const elapsedMs = batchElapsedMs(batch);
+    let etaStr = "Calculating...";
+    if (batch.completed > 0 && batch.completed < batch.files.length) {
+        const timePerImg = elapsedMs / batch.completed;
+        etaStr = formatDuration(timePerImg * (batch.files.length - batch.completed));
+    }
+    timerDiv.style.display = "block";
+    timerDiv.innerText = `Elapsed: ${formatDuration(elapsedMs)} | ETA: ${etaStr}`;
+}
+
+function updateBatchControls(batch) {
+    const stopBtn = document.getElementById("stop-batch-btn");
+    const resumeBtn = document.getElementById("resume-batch-btn");
+    const downloadBtn = document.getElementById("download-csv-btn");
+    if (!stopBtn || !resumeBtn || !downloadBtn) return;
+
+    const ownsUi = isActiveBatch(batch);
+    stopBtn.style.display = ownsUi && batch.running ? "inline-block" : "none";
+    resumeBtn.style.display = ownsUi && !batch.running && !batch.finished && batch.nextIndex < batch.files.length ? "inline-block" : "none";
+    downloadBtn.style.display = ownsUi && !batch.running && batch.successCount > 0 ? "inline-block" : "none";
+}
+
+function stopActiveBatch(reason = "stopped") {
+    if (!activeBatch || !activeBatch.running) return;
+    const batch = activeBatch;
+    batch.stopRequested = true;
+    batch.stopReason = reason;
+    if (batch.abortController) {
+        batch.abortController.abort();
+    }
+    if (reason === "replaced") {
+        if (batch.timerInterval) {
+            clearInterval(batch.timerInterval);
+            batch.timerInterval = null;
+        }
+        batch.elapsedMs = batchElapsedMs(batch);
+        batch.running = false;
+        return;
+    }
+    updateBatchControls(batch);
+}
+
+function finishBatch(batch, mode) {
+    if (!isActiveBatch(batch)) return;
+
+    if (batch.timerInterval) {
+        clearInterval(batch.timerInterval);
+        batch.timerInterval = null;
+    }
+    batch.elapsedMs = batchElapsedMs(batch);
+    batch.running = false;
+    batch.runStartedAt = null;
+
+    const status = document.getElementById("bulk-status");
+    const timerDiv = document.getElementById("batch-timer");
+    const chartsContainer = document.getElementById("histograms-container");
+    const remaining = Math.max(batch.files.length - batch.nextIndex, 0);
+    const excludedText = batch.pixelScaleCount > 0 ? ` ${batch.pixelScaleCount} pixel-scale row(s) ignored for spatial metrics.` : "";
+
+    if (timerDiv) {
+        timerDiv.style.display = "block";
+        timerDiv.innerText = `Total Time: ${formatDuration(batch.elapsedMs)}`;
+    }
+
+    if (mode === "complete") {
+        batch.finished = true;
+        status.innerText = `Batch complete: ${batch.successCount} succeeded, ${batch.failureCount} failed, ${batch.completed} attempted.${excludedText}`;
+    } else {
+        status.innerText = `Batch stopped: ${batch.successCount} succeeded, ${batch.failureCount} failed, ${batch.completed} attempted, ${remaining} remaining.${excludedText}`;
+    }
+
+    if (typeof gtag === 'function') {
+        gtag('event', mode === "complete" ? 'processed_bulk_batch' : 'stopped_bulk_batch', {
+            'event_category': 'Phenotyping',
+            'images_attempted': batch.completed,
+            'images_succeeded': batch.successCount
+        });
+    }
+
+    updateBatchControls(batch);
+    rebuildHistograms(chartsContainer);
+}
+
+function addBatchResult(batch, file, data) {
+    if (data.success) {
+        batch.successCount++;
+        const isCm = measurementUnit(data) === "cm";
+        const digits = isCm ? 1 : 0;
+        const notes = rowNotes(data);
+        if (!isCm) batch.pixelScaleCount++;
+
+        globalBatchResults.push({ file_name: file.name, data, included: true, isCm, digits, notes, success: true });
+    } else {
+        batch.failureCount++;
+        globalBatchResults.push({ file_name: file.name, success: false, message: `Error: ${data.message || "Unknown error"}` });
+    }
+}
+
+function addBatchFailure(batch, file, err) {
+    batch.failureCount++;
+    const msg = err.message === BULK_TIMEOUT_MESSAGE ? BULK_TIMEOUT_MESSAGE : `API Error: ${err.message}`;
+    globalBatchResults.push({ file_name: file.name, success: false, message: msg });
+}
 
 function renderTableHeader() {
     const table = document.getElementById("bulk-table");
@@ -664,96 +821,96 @@ function renderBulkTable() {
     });
 }
 
+async function runBatch(batch) {
+    const status = document.getElementById("bulk-status");
+    const chartsContainer = document.getElementById("histograms-container");
+
+    batch.running = true;
+    batch.finished = false;
+    batch.stopRequested = false;
+    batch.stopReason = null;
+    batch.runStartedAt = Date.now();
+    updateBatchTimer(batch);
+    updateBatchControls(batch);
+
+    if (batch.timerInterval) clearInterval(batch.timerInterval);
+    batch.timerInterval = setInterval(() => {
+        if (isActiveBatch(batch) && batch.running) updateBatchTimer(batch);
+    }, 1000);
+
+    while (batch.nextIndex < batch.files.length) {
+        if (!isActiveBatch(batch) || batch.stopRequested) break;
+
+        const index = batch.nextIndex;
+        const file = batch.files[index];
+        status.innerText = `${batch.completed > 0 ? "Processing" : "Starting"} image ${index + 1} of ${batch.files.length}...`;
+
+        batch.abortController = new AbortController();
+        try {
+            const data = await postBulkImage(file, selectedPreviewIds(), batch.abortController.signal);
+            batch.abortController = null;
+            if (!isActiveBatch(batch)) return;
+            if (batch.stopRequested) break;
+            addBatchResult(batch, file, data);
+        } catch (err) {
+            batch.abortController = null;
+            if (!isActiveBatch(batch)) return;
+            if (batch.stopRequested || err.message === "Batch stopped") break;
+            addBatchFailure(batch, file, err);
+        }
+
+        batch.completed++;
+        batch.nextIndex = index + 1;
+        renderBulkTable();
+        rebuildHistograms(chartsContainer);
+
+        if (batch.nextIndex < batch.files.length) {
+            await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
+        }
+    }
+
+    if (!isActiveBatch(batch)) return;
+
+    if (batch.nextIndex >= batch.files.length) {
+        finishBatch(batch, "complete");
+    } else {
+        finishBatch(batch, "stopped");
+    }
+}
+
 document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const files = document.getElementById("bulk-files").files;
-    const status = document.getElementById("bulk-status");
+    if (!files || files.length === 0) return;
+
+    stopActiveBatch("replaced");
+
     const table = document.getElementById("bulk-table");
     const chartsContainer = document.getElementById("histograms-container");
-    const downloadBtn = document.getElementById("download-csv-btn");
+    const timerDiv = document.getElementById("batch-timer");
+    const batch = makeBatchState(files);
+    activeBatch = batch;
 
     chartsContainer.innerHTML = "";
     table.style.display = "table";
     document.getElementById("bulk-section").classList.add("bulk-card");
-    downloadBtn.style.display = "none";
-
-    // Reset global state
-    globalBatchResults = [];
-    renderBulkTable();
-    let completed = 0, successCount = 0, failureCount = 0, pixelScaleCount = 0;
-    
-    // --- RESTORED TIMER INITIALIZATION ---
-    const timerDiv = document.getElementById("batch-timer");
     if (timerDiv) {
         timerDiv.style.display = "block";
         timerDiv.innerText = "Elapsed: 00:00 | ETA: Calculating...";
     }
-    const batchStartTime = Date.now();
-    let timerInterval = setInterval(() => {
-        if (!timerDiv) return;
-        const elapsedSec = Math.floor((Date.now() - batchStartTime) / 1000);
-        const m = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
-        const s = String(elapsedSec % 60).padStart(2, '0');
-        
-        let etaStr = "Calculating...";
-        if (completed > 0 && completed < files.length) {
-            const timePerImg = elapsedSec / completed;
-            const remainingSec = Math.floor(timePerImg * (files.length - completed));
-            const rm = String(Math.floor(remainingSec / 60)).padStart(2, '0');
-            const rs = String(remainingSec % 60).padStart(2, '0');
-            etaStr = `${rm}:${rs}`;
-        }
-        timerDiv.innerText = `Elapsed: ${m}:${s} | ETA: ${etaStr}`;
-    }, 1000);
-    // -------------------------------------
-    
-    for (let i = 0; i < files.length; i++) {
-        status.innerText = `Processing image ${i + 1} of ${files.length}...`;
 
-        try {
-            const data = await postBulkImage(files[i], selectedPreviewIds());
+    globalBatchResults = [];
+    renderBulkTable();
+    await runBatch(batch);
+});
 
-            if (data.success) {
-                successCount++;
-                const isCm = measurementUnit(data) === "cm";
-                const digits = isCm ? 1 : 0;
-                const notes = rowNotes(data);
-                if (!isCm) pixelScaleCount++;
+document.getElementById("stop-batch-btn").addEventListener("click", () => {
+    stopActiveBatch("stopped");
+});
 
-                globalBatchResults.push({ file_name: files[i].name, data, included: true, isCm, digits, notes, success: true });
-            } else {
-                failureCount++;
-                globalBatchResults.push({ file_name: files[i].name, success: false, message: `Error: ${data.message || "Unknown error"}` });
-            }
-        } catch (err) {
-            failureCount++;
-            const msg = err.message === BULK_TIMEOUT_MESSAGE ? BULK_TIMEOUT_MESSAGE : `API Error: ${err.message}`;
-            globalBatchResults.push({ file_name: files[i].name, success: false, message: msg });
-        }
-
-        completed++;
-        renderBulkTable();
-        rebuildHistograms(chartsContainer);
-        if (i < files.length - 1) await new Promise(r => setTimeout(r, 500));
-    }
-
-    clearInterval(timerInterval);
-    const finalElapsed = Math.floor((Date.now() - batchStartTime) / 1000);
-    const fm = String(Math.floor(finalElapsed / 60)).padStart(2, '0');
-    const fs = String(finalElapsed % 60).padStart(2, '0');
-    timerDiv.innerText = `Total Time: ${fm}:${fs}`;
-
-    const excludedText = pixelScaleCount > 0 ? ` ${pixelScaleCount} pixel-scale row(s) ignored for spatial metrics.` : "";
-    status.innerText = `Batch complete: ${successCount} succeeded, ${failureCount} failed, ${completed} attempted.${excludedText}`;
-
-    if (typeof gtag === 'function') {
-        gtag('event', 'processed_bulk_batch', { 'event_category': 'Phenotyping', 'images_attempted': completed, 'images_succeeded': successCount });
-    }
-    
-    if (successCount > 0) {
-        downloadBtn.style.display = "inline-block";
-        rebuildHistograms(chartsContainer);
-    }
+document.getElementById("resume-batch-btn").addEventListener("click", async () => {
+    if (!activeBatch || activeBatch.running || activeBatch.finished) return;
+    await runBatch(activeBatch);
 });
 
 // --- ROW TOGGLE LISTENER ---
