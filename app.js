@@ -385,15 +385,137 @@ function collectGroups(groups, map = new Map()) {
 
 function columnsForGroup(group) {
     if (!group) return [];
-    return collectColumns(group);
+    return orderedColumns(collectColumns(group));
 }
 
 const ALL_COLUMNS = COLUMN_GROUPS.flatMap(group => collectColumns(group));
+const ALL_COLUMN_IDS = ALL_COLUMNS.map(column => column.id);
+const COLUMN_BY_ID = new Map(ALL_COLUMNS.map(column => [column.id, column]));
 const COLUMN_GROUP_MAP = collectGroups(COLUMN_GROUPS);
 let visibleColumnIds = new Set(ALL_COLUMNS.map(column => column.id));
+let columnOrderIds = loadColumnOrderIds();
+let draggedColumnId = null;
+let latestSingleData = null;
+let latestSinglePreviewIds = [];
+
+function loadColumnOrderIds() {
+    const fallback = [...ALL_COLUMN_IDS];
+    try {
+        const parsed = JSON.parse(localStorage.getItem("watermelonColumnOrder") || "[]");
+        if (!Array.isArray(parsed)) return fallback;
+        const saved = parsed.filter(id => ALL_COLUMN_IDS.includes(id));
+        const missing = ALL_COLUMN_IDS.filter(id => !saved.includes(id));
+        return [...saved, ...missing];
+    } catch (err) {
+        return fallback;
+    }
+}
+
+function saveColumnOrderIds() {
+    try {
+        localStorage.setItem("watermelonColumnOrder", JSON.stringify(columnOrderIds));
+    } catch (err) {
+        // Non-critical: column order still works for the current session.
+    }
+}
+
+function orderedColumns(columns) {
+    const ids = new Set(columns.map(column => column.id));
+    return columnOrderIds
+        .filter(id => ids.has(id))
+        .map(id => COLUMN_BY_ID.get(id))
+        .filter(Boolean);
+}
+
+function reorderColumnIds(draggedId, targetId, insertAfter = false) {
+    if (!draggedId || !targetId || draggedId === targetId) return false;
+    if (!COLUMN_BY_ID.has(draggedId) || !COLUMN_BY_ID.has(targetId)) return false;
+
+    const nextOrder = columnOrderIds.filter(id => id !== draggedId);
+    let targetIndex = nextOrder.indexOf(targetId);
+    if (targetIndex < 0) return false;
+    if (insertAfter) targetIndex += 1;
+    nextOrder.splice(targetIndex, 0, draggedId);
+    columnOrderIds = nextOrder;
+    saveColumnOrderIds();
+    return true;
+}
+
+function draggableColumnElement(event) {
+    return event.target.closest(".column-option, .draggable-column-header");
+}
+
+function shouldInsertColumnAfter(event, element) {
+    const rect = element.getBoundingClientRect();
+    if (element.classList.contains("draggable-column-header")) {
+        return event.clientX > rect.left + rect.width / 2;
+    }
+    return event.clientY > rect.top + rect.height / 2;
+}
+
+function clearColumnDragState() {
+    document.querySelectorAll(".column-dragging, .column-drop-target").forEach(element => {
+        element.classList.remove("column-dragging", "column-drop-target");
+    });
+}
+
+function handleColumnDragStart(event) {
+    if (event.target.closest("input, button")) return;
+    const element = draggableColumnElement(event);
+    if (!element?.dataset.columnId) return;
+
+    draggedColumnId = element.dataset.columnId;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", draggedColumnId);
+    element.classList.add("column-dragging");
+}
+
+function handleColumnDragOver(event) {
+    const element = draggableColumnElement(event);
+    if (!element?.dataset.columnId || !draggedColumnId || element.dataset.columnId === draggedColumnId) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    document.querySelectorAll(".column-drop-target").forEach(target => target.classList.remove("column-drop-target"));
+    element.classList.add("column-drop-target");
+}
+
+function handleColumnDrop(event) {
+    const element = draggableColumnElement(event);
+    const sourceId = event.dataTransfer.getData("text/plain") || draggedColumnId;
+    if (!element?.dataset.columnId || !sourceId) return;
+
+    event.preventDefault();
+    const didReorder = reorderColumnIds(sourceId, element.dataset.columnId, shouldInsertColumnAfter(event, element));
+    draggedColumnId = null;
+    clearColumnDragState();
+    if (didReorder) {
+        renderColumnPicker();
+        syncVisibleOutputs();
+    }
+}
+
+function handleColumnDragEnd() {
+    draggedColumnId = null;
+    clearColumnDragState();
+}
+
+function setupColumnDragAndDrop() {
+    const containers = [
+        document.getElementById("column-menu"),
+        document.querySelector("#bulk-table thead")
+    ].filter(Boolean);
+
+    containers.forEach(container => {
+        container.addEventListener("dragstart", handleColumnDragStart);
+        container.addEventListener("dragover", handleColumnDragOver);
+        container.addEventListener("drop", handleColumnDrop);
+        container.addEventListener("dragend", handleColumnDragEnd);
+    });
+}
 
 function visibleColumns() {
-    return ALL_COLUMNS.filter(column => visibleColumnIds.has(column.id));
+    return orderedColumns(ALL_COLUMNS).filter(column => visibleColumnIds.has(column.id));
 }
 
 function visiblePreviewColumns() {
@@ -431,10 +553,11 @@ function renderColumnPicker() {
             <div class="column-children">
                 ${(group.children || []).map(child => renderGroup(child, depth + 1)).join("")}
                 ${group.columns && group.columns.length ? `<div class="column-options">
-                    ${group.columns.map(column => `
-                    <label class="column-option">
+                    ${orderedColumns(group.columns).map(column => `
+                    <label class="column-option" draggable="true" data-column-id="${column.id}">
+                        <span class="column-drag-handle" aria-hidden="true">::</span>
                         <input type="checkbox" class="column-checkbox" data-column-id="${column.id}">
-                        ${escapeHtml(column.label)}
+                        <span>${escapeHtml(column.label)}</span>
                     </label>
                     `).join("")}
                 </div>` : ""}
@@ -464,6 +587,7 @@ function updateColumnPickerChecks() {
 function syncVisibleOutputs() {
     renderBulkTable();
     rebuildHistograms(document.getElementById("histograms-container"));
+    renderCurrentSingleAnalysis();
 }
 
 function setupColumnControls() {
@@ -500,6 +624,8 @@ function setupColumnControls() {
         updateColumnPickerChecks();
         syncVisibleOutputs();
     });
+
+    setupColumnDragAndDrop();
 }
 
 setupColumnControls();
@@ -523,7 +649,7 @@ function renderSingleMetricCard(title, columns, item) {
 
 function renderSingleMetricGroups(group, item, ancestry = []) {
     const title = [...ancestry, group.label].join(" / ");
-    const ownCard = group.columns ? renderSingleMetricCard(title, group.columns, item) : "";
+    const ownCard = group.columns ? renderSingleMetricCard(title, orderedColumns(group.columns), item) : "";
     const childCards = (group.children || []).map(child => renderSingleMetricGroups(child, item, [...ancestry, group.label])).join("");
     return ownCard + childCards;
 }
@@ -572,6 +698,14 @@ function renderSingleAnalysis(data, previewIds = []) {
     `;
 }
 
+function renderCurrentSingleAnalysis() {
+    if (!latestSingleData?.success) return;
+    const resultDiv = document.getElementById("single-result");
+    if (!resultDiv) return;
+    const previewIds = selectedPreviewIds().filter(id => latestSinglePreviewIds.includes(id));
+    resultDiv.innerHTML = renderSingleAnalysis(latestSingleData, previewIds);
+}
+
 document.getElementById("single-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const file = document.getElementById("single-file").files[0];
@@ -587,6 +721,8 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
         
         if (data.success) {
             status.innerText = "Success";
+            latestSingleData = data;
+            latestSinglePreviewIds = requestedPreviewIds;
 
             // Send event to Google Analytics
             if (typeof gtag === 'function') {
@@ -599,11 +735,15 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
 
             resultDiv.innerHTML = renderSingleAnalysis(data, requestedPreviewIds);
         } else {
+            latestSingleData = null;
+            latestSinglePreviewIds = [];
             const notes = rowNotes(data);
             status.innerText = `Error: ${data.message}`;
             resultDiv.innerHTML = notes ? `<p><strong>Notes:</strong> ${escapeHtml(notes)}</p>` : "";
         }
     } catch (err) {
+        latestSingleData = null;
+        latestSinglePreviewIds = [];
         status.innerText = `API request failed: ${err.message}`;
     }
 });
@@ -765,7 +905,7 @@ function renderTableHeader() {
         <tr>
             <th>Include</th>
             <th>Filename</th>
-            ${visibleColumns().map(column => `<th>${escapeHtml(column.label)}</th>`).join("")}
+            ${visibleColumns().map(column => `<th class="draggable-column-header" draggable="true" data-column-id="${column.id}">${escapeHtml(column.label)}</th>`).join("")}
         </tr>
     `;
 }

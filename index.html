@@ -50,6 +50,10 @@
     tr.excluded-row td { background-color: #ffe6e6; color: #999; text-decoration: line-through; }
     tr.excluded-row img { filter: grayscale(100%) opacity(0.5); }
     .toggle-checkbox { cursor: pointer; transform: scale(1.2); }
+    th.draggable-column-header { cursor: grab; user-select: none; }
+    th.draggable-column-header:active { cursor: grabbing; }
+    .column-dragging { opacity: 0.45; }
+    .column-drop-target { outline: 2px solid #1170ff; outline-offset: -2px; background: #eaf2ff !important; }
     .bulk-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
     .column-dropdown { position: relative; display: inline-block; }
     #column-menu-button { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding-right: 28px; position: relative; }
@@ -63,7 +67,9 @@
     .column-group summary label { cursor: pointer; }
     .column-children { margin-top: 6px; }
     .column-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; margin-top: 8px; padding-left: 12px; }
-    .column-option { display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 1.25; }
+    .column-option { display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 1.25; border-radius: 4px; padding: 2px 3px; cursor: grab; }
+    .column-option:active { cursor: grabbing; }
+    .column-drag-handle { color: #7a8790; font-family: monospace; font-weight: 700; letter-spacing: 0; }
     .column-option input, .column-group-checkbox { cursor: pointer; }
   </style>
 </head>
