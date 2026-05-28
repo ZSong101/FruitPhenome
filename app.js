@@ -4,7 +4,7 @@
 let API_URL = "https://PPAL-SongLab-UGA-watermelon-proxy.hf.space/proxy_process";
 
 const SINGLE_REQUEST_TIMEOUT_MS = 120000; // 2 minutes
-const BULK_REQUEST_TIMEOUT_MS = 400000;
+const BULK_REQUEST_TIMEOUT_MS = 40000;
 const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
 const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621315d0";
 
