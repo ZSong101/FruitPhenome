@@ -70,10 +70,16 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     }
 });
 
-function processUrl(previewIds = []) {
+function shouldRequestLineOcr(previewIds = []) {
+    return previewIds.includes("image_line_ocr_base64")
+        || (typeof visibleColumnIds !== "undefined" && (visibleColumnIds.has("line") || visibleColumnIds.has("line_orientation")));
+}
+
+function processUrl(previewIds = [], includeLineOcr = false) {
     const params = new URLSearchParams();
     params.set("include_image", previewIds.length > 0 ? "true" : "false");
     if (previewIds.length > 0) params.set("preview_types", previewIds.join(","));
+    if (includeLineOcr) params.set("include_line_ocr", "true");
     return `${API_URL}?${params.toString()}`;
 }
 
@@ -111,7 +117,7 @@ function rowNotes(data) {
     return notes.join(" | ");
 }
 
-async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null) {
+async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null, includeLineOcr = shouldRequestLineOcr(previewIds)) {
     const formData = new FormData();
     formData.append("password", currentPassword);
     formData.append("username", currentUsername); 
@@ -127,7 +133,7 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
 
         try {
             // Strict timeout wrapper
-            const fetchPromise = fetch(processUrl(previewIds), {
+            const fetchPromise = fetch(processUrl(previewIds, includeLineOcr), {
                 method: "POST",
                 body: formData,
                 signal: controller.signal
@@ -185,8 +191,8 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
 }
 
 async function postBulkImage(file, previewIds, externalSignal = null) {
-    // 40 second timeout, 1 automatic retry if the server drops the connection
-    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 1, externalSignal);
+    // 40 second timeout, no retry; the batch moves on promptly.
+    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, shouldRequestLineOcr(previewIds));
 }
 
 function previewCell(data) {
@@ -208,8 +214,11 @@ function metricColumn(id, label, field, digits = 3, options = {}) {
         csvLabel: options.csvLabel || label,
         digits,
         histogram: options.histogram !== false,
+        histogramOverflow: options.histogramOverflow,
         csv: options.csv !== false,
         cellClass: options.cellClass || "",
+        display: options.display,
+        csvValue: options.csvValue,
         get: options.get || ((data) => valueOrNull(data[field]))
     };
 }
@@ -366,7 +375,12 @@ const COLUMN_GROUPS = [
         label: "Run Info",
         columns: [
             metricColumn("line", "Line", "line", 0, { histogram: false }),
-            metricColumn("processing_ms", "Time (ms)", "processing_ms", 0)
+            metricColumn("line_orientation", "Orientation", "line_orientation", 0, { histogram: false, get: (data) => valueOrNull(data.line_orientation ?? 0) }),
+            metricColumn("processing_ms", "Time (ms)", "processing_ms", 0, {
+                histogramOverflow: BULK_REQUEST_TIMEOUT_MS,
+                display: (value, item) => item.data?.processing_ms_timeout ? `>${BULK_REQUEST_TIMEOUT_MS}` : (isNumber(value) ? fmt(value, 0) : "N/A"),
+                csvValue: (value, item) => item.data?.processing_ms_timeout ? `>${BULK_REQUEST_TIMEOUT_MS}` : value
+            })
         ]
     }
 ];
@@ -896,8 +910,26 @@ function addBatchResult(batch, file, data) {
 
 function addBatchFailure(batch, file, err) {
     batch.failureCount++;
-    const msg = err.message === BULK_TIMEOUT_MESSAGE ? BULK_TIMEOUT_MESSAGE : `API Error: ${err.message}`;
-    globalBatchResults.push({ file_name: file.name, success: false, message: msg });
+    const isTimeout = err.message === BULK_TIMEOUT_MESSAGE;
+    const msg = isTimeout ? BULK_TIMEOUT_MESSAGE : `API Error: ${err.message}`;
+    const data = {
+        filename: file.name,
+        warnings: [msg],
+        processing_ms: isTimeout ? BULK_REQUEST_TIMEOUT_MS + 1 : null,
+        processing_ms_timeout: isTimeout
+    };
+    globalBatchResults.push({
+        file_name: file.name,
+        data,
+        included: isTimeout,
+        isCm: false,
+        allowPixelMetrics: true,
+        digits: 0,
+        notes: msg,
+        success: false,
+        includeFailedMetrics: isTimeout,
+        message: msg
+    });
 }
 
 function renderTableHeader() {
@@ -918,6 +950,9 @@ function renderCell(column, item) {
     }
 
     const value = columnValue(column, item);
+    if (column.display) {
+        return escapeHtml(column.display(value, item));
+    }
     if (isNumber(value)) {
         return escapeHtml(fmt(value, columnDigits(column, item)));
     }
@@ -947,10 +982,16 @@ function renderBulkTable() {
                 ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
             `;
         } else {
+            if (!item.included) tr.classList.add("excluded-row");
+            const includeCell = item.includeFailedMetrics
+                ? `<input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}">`
+                : "-";
             tr.innerHTML = `
-                <td>-</td>
-                <td>${escapeHtml(item.file_name)}</td>
-                <td colspan="${Math.max(columns.length, 1)}" style="color:red;">${escapeHtml(item.message)}</td>
+                <td>${includeCell}</td>
+                <td>${escapeHtml(item.file_name)}
+                    <span style="color:red; margin-left:6px;">${escapeHtml(item.message)}</span>
+                </td>
+                ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}" style="color:${item.includeFailedMetrics ? "inherit" : "red"};">${renderCell(column, item)}</td>`).join("")}
             `;
         }
         tbody.appendChild(tr);
@@ -1078,23 +1119,31 @@ function rebuildHistograms(container) {
 
     // Only pull data from rows that are checked (included: true)
     globalBatchResults.forEach(item => {
-        if (!item.included || !item.success) return;
+        if (!item.included || (!item.success && !item.includeFailedMetrics)) return;
         histogramColumns.forEach(column => {
             const value = columnValue(column, item);
             if (isNumber(value)) {
-                batchData[column.histLabel || column.label].push(value);
+                const key = column.histLabel || column.label;
+                batchData[key].push(value);
             }
         });
     });
 
-    drawHistograms(batchData, container);
+    drawHistograms(
+        histogramColumns.map(column => ({
+            column,
+            title: column.histLabel || column.label,
+            values: batchData[column.histLabel || column.label] || []
+        })),
+        container
+    );
 }
 
-function drawHistograms(batchData, container) {
-    const deKeys = Object.keys(batchData).filter(k => k.includes("ΔE"));
+function drawHistograms(histogramSeries, container) {
+    const deSeries = histogramSeries.filter(series => series.title.includes("ΔE"));
     let allDE =[];
-    deKeys.forEach(k => {
-        if (batchData[k]) allDE.push(...batchData[k].filter(isNumber));
+    deSeries.forEach(series => {
+        if (series.values) allDE.push(...series.values.filter(isNumber));
     });
 
     let deMin = 0, deMax = 1, deNumBins = 10, deBinWidth = 0.1, deMaxY = null;
@@ -1111,8 +1160,8 @@ function drawHistograms(batchData, container) {
         deBinWidth = (deMax - deMin) / deNumBins || 1;
 
         let maxCount = 0;
-        deKeys.forEach(k => {
-            const vals = batchData[k] ? batchData[k].filter(isNumber) :[];
+        deSeries.forEach(series => {
+            const vals = series.values ? series.values.filter(isNumber) :[];
             const counts = new Array(deNumBins).fill(0);
             vals.forEach(val => {
                 let idx = Math.floor((val - deMin) / deBinWidth);
@@ -1126,14 +1175,20 @@ function drawHistograms(batchData, container) {
     }
 
     let chartCount = 0;
-    for (const [title, rawValues] of Object.entries(batchData)) {
-        const values = rawValues.filter(isNumber);
-        if (values.length === 0) continue;
+    for (const series of histogramSeries) {
+        const title = series.title;
+        const overflowThreshold = series.column.histogramOverflow;
+        const numericValues = series.values.filter(isNumber);
+        const overflowValues = overflowThreshold !== undefined ? numericValues.filter(v => v > overflowThreshold) : [];
+        const values = overflowThreshold !== undefined ? numericValues.filter(v => v <= overflowThreshold) : numericValues;
+        if (values.length === 0 && overflowValues.length === 0) continue;
 
         let min, max, numBins, binWidth, maxY;
         const isDE = title.includes("ΔE");
 
-        if (isDE && allDE.length > 0) {
+        if (values.length === 0) {
+            min = 0; max = 1; numBins = 0; binWidth = 1; maxY = null;
+        } else if (isDE && allDE.length > 0) {
             min = deMin; max = deMax; numBins = deNumBins; binWidth = deBinWidth; maxY = deMaxY;
         } else {
             values.sort((a, b) => a - b);
@@ -1166,6 +1221,11 @@ function drawHistograms(batchData, container) {
             if (idx < 0) idx = 0;
             counts[idx]++;
         });
+
+        if (overflowValues.length > 0) {
+            labels.push(`>${overflowThreshold}`);
+            counts.push(overflowValues.length);
+        }
 
         const wrapper = document.createElement("div");
         wrapper.className = "chart-box";
@@ -1213,11 +1273,12 @@ document.getElementById("download-csv-btn").addEventListener("click", () => {
     const rows = [header.map(csvEscape).join(",")];
 
     globalBatchResults.forEach(item => {
-        if (!item.success || !item.included) return;
+        if (!item.included || (!item.success && !item.includeFailedMetrics)) return;
         const values = [item.data.filename || item.file_name];
         columns.forEach(column => {
             const value = columnValue(column, item);
-            values.push(isNumber(value) ? value : (value || ""));
+            const csvValue = column.csvValue ? column.csvValue(value, item) : value;
+            values.push(isNumber(csvValue) ? csvValue : (csvValue || ""));
         });
         rows.push(values.map(csvEscape).join(","));
     });
