@@ -73,6 +73,8 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
 
 function shouldRequestLineOcr(previewIds = []) {
     return previewIds.includes("image_line_ocr_base64")
+        || previewIds.includes("image_ocr_dbnet_base64")
+        || previewIds.includes("image_ocr_opencv_base64")
         || (typeof visibleColumnIds !== "undefined" && (visibleColumnIds.has("line") || visibleColumnIds.has("line_orientation")));
 }
 
@@ -358,7 +360,8 @@ const COLUMN_GROUPS = [
                 id: "previews_standard",
                 label: "Standard Previews",
                 columns: [
-                    previewColumn("image_line_ocr_base64", "Preview (OCR)", "image_line_ocr_base64"),
+                    previewColumn("image_ocr_dbnet_base64", "Preview (OCR DBNet)", "image_ocr_dbnet_base64"),
+                    previewColumn("image_ocr_opencv_base64", "Preview (OCR OpenCV)", "image_ocr_opencv_base64"),
                     previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
                     previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
                     previewColumn("image_cleanup_hybrid_base64", "Preview (Cleanup)", "image_cleanup_hybrid_base64"),
