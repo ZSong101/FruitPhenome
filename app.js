@@ -1,6 +1,7 @@
 // For local testing, change to http://localhost:8000/process_single
 //let API_URL = "https://crabbly-watermelonphenotyping.hf.space/process_single";
-let API_URL = "https://fruit-proxy-cv71.onrender.com/proxy_process";
+//let API_URL = "https://fruit-proxy-cv71.onrender.com/proxy_process";
+let API_URL = "https://PPAL-SongLab-UGA-watermelon-proxy.hf.space/proxy_process";
 const SINGLE_REQUEST_TIMEOUT_MS = 120000; // 2 minutes
 const BULK_REQUEST_TIMEOUT_MS = 40000;
 const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
