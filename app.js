@@ -74,7 +74,11 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
 function shouldRequestLineOcr(previewIds = []) {
     return previewIds.includes("image_line_ocr_base64")
         || previewIds.includes("image_ocr_dbnet_base64")
-        || (typeof visibleColumnIds !== "undefined" && (visibleColumnIds.has("line") || visibleColumnIds.has("line_orientation")));
+        || (typeof visibleColumnIds !== "undefined" && (
+            visibleColumnIds.has("line")
+            || visibleColumnIds.has("line_confidence")
+            || visibleColumnIds.has("line_orientation")
+        ));
 }
 
 function processUrl(previewIds = [], includeLineOcr = false) {
@@ -374,6 +378,7 @@ const COLUMN_GROUPS = [
         label: "Run Info",
         columns: [
             metricColumn("line", "Line", "line", 0, { histogram: false }),
+            metricColumn("line_confidence", "Line Confidence", "line_confidence", 2, { histogram: false }),
             metricColumn("line_orientation", "Orientation", "line_orientation", 0, { histogram: false, get: (data) => valueOrNull(data.line_orientation ?? 0) }),
             metricColumn("processing_ms", "Time (ms)", "processing_ms", 0, {
                 histogramOverflow: BULK_REQUEST_TIMEOUT_MS,
