@@ -333,11 +333,27 @@ const COLUMN_GROUPS = [
     {
         id: "previews",
         label: "Previews",
-        columns: [
-            previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
-            previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
-            previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64"),
-            previewColumn("image_traditional_base64", "Preview (Traditional)", "image_traditional_base64")
+        children: [
+            {
+                id: "previews_standard",
+                label: "Standard Previews",
+                columns: [
+                    previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
+                    previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
+                    previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64"),
+                    previewColumn("image_traditional_base64", "Preview (Traditional)", "image_traditional_base64")
+                ]
+            },
+            {
+                id: "previews_cleanup",
+                label: "Mask Cleanup Comparison",
+                columns: [
+                    previewColumn("image_cleanup_morph_base64", "Preview (Morph Cleanup)", "image_cleanup_morph_base64"),
+                    previewColumn("image_cleanup_blur_base64", "Preview (Blur Cleanup)", "image_cleanup_blur_base64"),
+                    previewColumn("image_cleanup_contour_base64", "Preview (Contour Cleanup)", "image_cleanup_contour_base64"),
+                    previewColumn("image_cleanup_hybrid_base64", "Preview (Hybrid Cleanup)", "image_cleanup_hybrid_base64")
+                ]
+            }
         ]
     },
     {
