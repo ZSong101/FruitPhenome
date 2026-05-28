@@ -669,9 +669,18 @@ function captureBatchScrollAnchor() {
     const tableRect = table.getBoundingClientRect();
     const tableTop = window.scrollY + tableRect.top;
     const tableBottom = window.scrollY + tableRect.bottom;
+    const bottomOffset = scrollHeight - viewportBottom;
+    const nearPageBottom = bottomOffset < 180;
     const aboveTable = window.scrollY < tableTop - 20;
-    const nearPageBottom = scrollHeight - viewportBottom < 120;
     const alreadyBelowTable = window.scrollY > tableBottom - 20;
+
+    if (nearPageBottom) {
+        return {
+            active: true,
+            mode: "page-bottom",
+            bottomOffset: Math.max(0, bottomOffset)
+        };
+    }
 
     return {
         active: aboveTable || nearPageBottom || alreadyBelowTable,
@@ -683,7 +692,13 @@ function captureBatchScrollAnchor() {
 
 function restoreBatchScrollAnchor(anchor) {
     if (!anchor?.active) return;
-    requestAnimationFrame(() => {
+    const apply = () => {
+        if (anchor.mode === "page-bottom") {
+            const doc = document.documentElement;
+            const nextScrollHeight = Math.max(doc.scrollHeight, document.body.scrollHeight);
+            window.scrollTo({ top: Math.max(0, nextScrollHeight - window.innerHeight - (anchor.bottomOffset || 0)), behavior: "auto" });
+            return;
+        }
         if (anchor.mode === "fixed") {
             window.scrollTo({ top: anchor.scrollY, behavior: "auto" });
             return;
@@ -694,12 +709,23 @@ function restoreBatchScrollAnchor(anchor) {
         if (heightDelta !== 0) {
             window.scrollTo({ top: Math.max(0, anchor.scrollY + heightDelta), behavior: "auto" });
         }
+    };
+    requestAnimationFrame(() => {
+        apply();
+        requestAnimationFrame(apply);
+        setTimeout(apply, 120);
     });
 }
 
 function refreshBatchOutputs(chartsContainer) {
     const anchor = captureBatchScrollAnchor();
     renderBulkTable();
+    document.querySelectorAll("#bulk-table img.preview-img").forEach(img => {
+        if (!img.complete) {
+            img.addEventListener("load", () => restoreBatchScrollAnchor(anchor), { once: true });
+            img.addEventListener("error", () => restoreBatchScrollAnchor(anchor), { once: true });
+        }
+    });
     rebuildHistograms(chartsContainer || document.getElementById("histograms-container"));
     restoreBatchScrollAnchor(anchor);
 }
