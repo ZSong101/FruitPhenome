@@ -71,9 +71,14 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     }
 });
 
-function shouldRequestLineOcr(previewIds = []) {
+function hasLineOptionList(settings) {
+    return Boolean(settings?.lineOptions && settings.lineOptions.trim());
+}
+
+function shouldRequestLineOcr(previewIds = [], settings = null) {
     return previewIds.includes("image_line_ocr_base64")
         || previewIds.includes("image_ocr_dbnet_base64")
+        || hasLineOptionList(settings || getAnalysisSettingsSnapshot())
         || (typeof visibleColumnIds !== "undefined" && (
             visibleColumnIds.has("line")
             || visibleColumnIds.has("line_confidence")
@@ -105,13 +110,12 @@ function fmt(value, digits = 1) {
 
 function measurementUnit(data) {
     if (data.measurement_unit) return data.measurement_unit;
-    return data.delta_e_final !== null && data.delta_e_final !== undefined ? "cm" : "px";
+    return "cm";
 }
 
 function areaUnit(data) {
     if (data.area_unit === "cm2") return "cm²";
-    if (data.area_unit === "px2") return "px²";
-    return measurementUnit(data) === "cm" ? "cm²" : "px²";
+    return "cm²";
 }
 
 function rowNotes(data) {
@@ -123,11 +127,62 @@ function rowNotes(data) {
     return notes.join(" | ");
 }
 
-async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null, includeLineOcr = shouldRequestLineOcr(previewIds)) {
+function sliderNumber(id, fallback) {
+    const el = document.getElementById(id);
+    const value = Number(el?.value);
+    return Number.isFinite(value) ? value : fallback;
+}
+
+function getAnalysisSettingsSnapshot() {
+    return {
+        lineOptions: document.getElementById("line-options-input")?.value || "",
+        scaleValue: (document.getElementById("scale-value-input")?.value || "").trim(),
+        scaleUnit: document.getElementById("scale-unit-select")?.value || "cm_per_px",
+        traditionalSettings: {
+            proximal_width_percent: sliderNumber("trad-proximal-width-input", 10),
+            distal_width_percent: sliderNumber("trad-distal-width-input", 10),
+            angle_sample_percent: sliderNumber("trad-angle-span-input", 5),
+            end_indentation_percent: sliderNumber("trad-end-band-input", 25)
+        }
+    };
+}
+
+function appendAnalysisSettings(formData, settings) {
+    const snapshot = settings || getAnalysisSettingsSnapshot();
+    formData.append("line_options", snapshot.lineOptions || "");
+    formData.append("scale_value", snapshot.scaleValue || "");
+    formData.append("scale_unit", snapshot.scaleUnit || "cm_per_px");
+    formData.append("traditional_settings", JSON.stringify(snapshot.traditionalSettings || {}));
+}
+
+function updateSettingsSliderLabels() {
+    [
+        ["trad-proximal-width-input", "trad-proximal-width-value"],
+        ["trad-distal-width-input", "trad-distal-width-value"],
+        ["trad-angle-span-input", "trad-angle-span-value"],
+        ["trad-end-band-input", "trad-end-band-value"]
+    ].forEach(([inputId, valueId]) => {
+        const input = document.getElementById(inputId);
+        const out = document.getElementById(valueId);
+        if (input && out) out.innerText = `${Number(input.value).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+    });
+}
+
+function setupAnalysisSettingsControls() {
+    updateSettingsSliderLabels();
+    document.querySelectorAll("#analysis-settings-fieldset input[type='range']").forEach(input => {
+        input.addEventListener("input", updateSettingsSliderLabels);
+    });
+}
+
+async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null, settings = null, includeLineOcr = null) {
+    const requestSettings = settings || getAnalysisSettingsSnapshot();
+    const runLineOcr = includeLineOcr ?? shouldRequestLineOcr(previewIds, requestSettings);
     const formData = new FormData();
     formData.append("password", currentPassword);
     formData.append("username", currentUsername); 
     formData.append("file", file);
+    appendAnalysisSettings(formData, requestSettings);
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         if (externalSignal?.aborted) throw new Error("Batch stopped");
@@ -142,7 +197,7 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
         externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
 
         try {
-            const response = await fetch(processUrl(previewIds, includeLineOcr), {
+            const response = await fetch(processUrl(previewIds, runLineOcr), {
                 method: "POST",
                 body: formData,
                 signal: controller.signal
@@ -193,9 +248,9 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
     }
 }
 
-async function postBulkImage(file, previewIds, externalSignal = null) {
+async function postBulkImage(file, previewIds, externalSignal = null, settings = null) {
     // 40 second timeout, no retry; the batch moves on promptly.
-    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, shouldRequestLineOcr(previewIds));
+    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, settings);
 }
 
 function previewCell(data) {
@@ -229,7 +284,7 @@ function metricColumn(id, label, field, digits = 3, options = {}) {
 function cmMetricColumn(id, label, field, digits = (item) => item.digits, options = {}) {
     return metricColumn(id, label, field, digits, {
         ...options,
-        get: (data, item) => (item.isCm || item.allowPixelMetrics) ? valueOrNull(data[field]) : null
+        get: (data, item) => item.isCm ? valueOrNull(data[field]) : null
     });
 }
 
@@ -255,16 +310,16 @@ const COLUMN_GROUPS = [
                 id: "experimental_raw",
                 label: "Cleanup Features",
                 columns: [
-                    cmMetricColumn("raw_width", "Width (Cleanup)", "raw_width", undefined, { histLabel: "Width - Cleanup (cm)" }),
-                    cmMetricColumn("raw_height", "Height (Cleanup)", "raw_height", undefined, { histLabel: "Height - Cleanup (cm)" }),
-                    cmMetricColumn("raw_perimeter", "Perim (Cleanup)", "raw_perimeter", undefined, { histLabel: "Perim - Cleanup (cm)" }),
-                    cmMetricColumn("raw_flesh_width", "F.Width (Cleanup)", "raw_flesh_width", undefined, { histLabel: "F.Width - Cleanup (cm)" }),
-                    cmMetricColumn("raw_flesh_height", "F.Height (Cleanup)", "raw_flesh_height", undefined, { histLabel: "F.Height - Cleanup (cm)" }),
-                    cmMetricColumn("raw_flesh_perimeter", "F.Perim (Cleanup)", "raw_flesh_perimeter", undefined, { histLabel: "F.Perim - Cleanup (cm)" }),
-                    cmMetricColumn("raw_rind_thick", "Rind Thick (Cleanup)", "raw_rind_thick", undefined, { histLabel: "Rind Thick - Cleanup (cm)" }),
+                    cmMetricColumn("raw_width", "Width (Cleanup, cm)", "raw_width", undefined, { histLabel: "Width - Cleanup (cm)" }),
+                    cmMetricColumn("raw_height", "Height (Cleanup, cm)", "raw_height", undefined, { histLabel: "Height - Cleanup (cm)" }),
+                    cmMetricColumn("raw_perimeter", "Perim (Cleanup, cm)", "raw_perimeter", undefined, { histLabel: "Perim - Cleanup (cm)" }),
+                    cmMetricColumn("raw_flesh_width", "F.Width (Cleanup, cm)", "raw_flesh_width", undefined, { histLabel: "F.Width - Cleanup (cm)" }),
+                    cmMetricColumn("raw_flesh_height", "F.Height (Cleanup, cm)", "raw_flesh_height", undefined, { histLabel: "F.Height - Cleanup (cm)" }),
+                    cmMetricColumn("raw_flesh_perimeter", "F.Perim (Cleanup, cm)", "raw_flesh_perimeter", undefined, { histLabel: "F.Perim - Cleanup (cm)" }),
+                    cmMetricColumn("raw_rind_thick", "Rind Thick (Cleanup, cm)", "raw_rind_thick", undefined, { histLabel: "Rind Thick - Cleanup (cm)" }),
                     metricColumn("raw_rind_ratio", "Rind Ratio (Cleanup)", "raw_rind_ratio", 3, { histLabel: "Rind Ratio - Cleanup" }),
-                    cmMetricColumn("raw_total_area", "Tot Area (Cleanup)", "raw_total_area", undefined, { histLabel: "Total Area - Cleanup (cm²)" }),
-                    cmMetricColumn("raw_flesh_area", "Flesh Area (Cleanup)", "raw_flesh_area", undefined, { histLabel: "Flesh Area - Cleanup (cm²)" }),
+                    cmMetricColumn("raw_total_area", "Tot Area (Cleanup, cm²)", "raw_total_area", undefined, { histLabel: "Total Area - Cleanup (cm²)" }),
+                    cmMetricColumn("raw_flesh_area", "Flesh Area (Cleanup, cm²)", "raw_flesh_area", undefined, { histLabel: "Flesh Area - Cleanup (cm²)" }),
                     metricColumn("raw_flesh_ratio", "Flesh Rat (Cleanup)", "raw_flesh_ratio", 3, { histLabel: "Flesh Ratio - Cleanup" }),
                     metricColumn("raw_elongation", "Elong (Cleanup)", "raw_elongation", 3, { histLabel: "Elongation - Cleanup" }),
                     metricColumn("raw_asym", "Asym (Cleanup)", "raw_asym", 3, { histLabel: "Asymmetry - Cleanup" }),
@@ -278,16 +333,16 @@ const COLUMN_GROUPS = [
                 columns: [
                     metricColumn("r2_rind", "R² Rind", "r2_rind", 4, { csvLabel: "R2 Rind" }),
                     metricColumn("r2_flesh", "R² Flesh", "r2_flesh", 4, { csvLabel: "R2 Flesh" }),
-                    cmMetricColumn("sm_width", "Width (Sm)", "sm_width", undefined, { histLabel: "Width - Sm (cm)" }),
-                    cmMetricColumn("sm_height", "Height (Sm)", "sm_height", undefined, { histLabel: "Height - Sm (cm)" }),
-                    cmMetricColumn("sm_perimeter", "Perim (Sm)", "sm_perimeter", undefined, { histLabel: "Perim - Sm (cm)" }),
-                    cmMetricColumn("sm_flesh_width", "F.Width (Sm)", "sm_flesh_width", undefined, { histLabel: "F.Width - Sm (cm)" }),
-                    cmMetricColumn("sm_flesh_height", "F.Height (Sm)", "sm_flesh_height", undefined, { histLabel: "F.Height - Sm (cm)" }),
-                    cmMetricColumn("sm_flesh_perimeter", "F.Perim (Sm)", "sm_flesh_perimeter", undefined, { histLabel: "F.Perim - Sm (cm)" }),
-                    cmMetricColumn("sm_rind_thick", "Rind Thick (Sm)", "sm_rind_thick", undefined, { histLabel: "Rind Thick - Sm (cm)" }),
+                    cmMetricColumn("sm_width", "Width (Sm, cm)", "sm_width", undefined, { histLabel: "Width - Sm (cm)" }),
+                    cmMetricColumn("sm_height", "Height (Sm, cm)", "sm_height", undefined, { histLabel: "Height - Sm (cm)" }),
+                    cmMetricColumn("sm_perimeter", "Perim (Sm, cm)", "sm_perimeter", undefined, { histLabel: "Perim - Sm (cm)" }),
+                    cmMetricColumn("sm_flesh_width", "F.Width (Sm, cm)", "sm_flesh_width", undefined, { histLabel: "F.Width - Sm (cm)" }),
+                    cmMetricColumn("sm_flesh_height", "F.Height (Sm, cm)", "sm_flesh_height", undefined, { histLabel: "F.Height - Sm (cm)" }),
+                    cmMetricColumn("sm_flesh_perimeter", "F.Perim (Sm, cm)", "sm_flesh_perimeter", undefined, { histLabel: "F.Perim - Sm (cm)" }),
+                    cmMetricColumn("sm_rind_thick", "Rind Thick (Sm, cm)", "sm_rind_thick", undefined, { histLabel: "Rind Thick - Sm (cm)" }),
                     metricColumn("sm_rind_ratio", "Rind Ratio (Sm)", "sm_rind_ratio", 3, { histLabel: "Rind Ratio - Sm" }),
-                    cmMetricColumn("sm_total_area", "Tot Area (Sm)", "sm_total_area", undefined, { histLabel: "Total Area - Sm (cm²)" }),
-                    cmMetricColumn("sm_flesh_area", "Flesh Area (Sm)", "sm_flesh_area", undefined, { histLabel: "Flesh Area - Sm (cm²)" }),
+                    cmMetricColumn("sm_total_area", "Tot Area (Sm, cm²)", "sm_total_area", undefined, { histLabel: "Total Area - Sm (cm²)" }),
+                    cmMetricColumn("sm_flesh_area", "Flesh Area (Sm, cm²)", "sm_flesh_area", undefined, { histLabel: "Flesh Area - Sm (cm²)" }),
                     metricColumn("sm_flesh_ratio", "Flesh Rat (Sm)", "sm_flesh_ratio", 3, { histLabel: "Flesh Ratio - Sm" }),
                     metricColumn("sm_elongation", "Elong (Sm)", "sm_elongation", 3, { histLabel: "Elongation - Sm" }),
                     metricColumn("sm_asym", "Asym (Sm)", "sm_asym", 3, { histLabel: "Asymmetry - Sm" }),
@@ -333,10 +388,10 @@ const COLUMN_GROUPS = [
                 id: "traditional_end_shape",
                 label: "End Shape",
                 columns: [
-                    metricColumn("trad_distal_angle", "Distal Angle", "trad_distal_angle", 1),
+                    metricColumn("trad_distal_angle", "Distal Angle (deg)", "trad_distal_angle", 1),
                     metricColumn("trad_distal_blockiness", "Distal Blockiness", "trad_distal_blockiness", 3),
                     metricColumn("trad_distal_indentation_area", "Distal Indent Area", "trad_distal_indentation_area", 4),
-                    metricColumn("trad_proximal_angle", "Proximal Angle", "trad_proximal_angle", 1),
+                    metricColumn("trad_proximal_angle", "Proximal Angle (deg)", "trad_proximal_angle", 1),
                     metricColumn("trad_proximal_blockiness", "Proximal Blockiness", "trad_proximal_blockiness", 3),
                     metricColumn("trad_proximal_shoulder_height", "Shoulder Height", "trad_proximal_shoulder_height", 4),
                     metricColumn("trad_proximal_indentation_area", "Proximal Indent Area", "trad_proximal_indentation_area", 4)
@@ -693,6 +748,7 @@ function setupColumnControls() {
 }
 
 setupColumnControls();
+setupAnalysisSettingsControls();
 
 function renderSingleMetricCard(title, columns, item) {
     const metricColumns = columns.filter(column => !column.html);
@@ -781,7 +837,7 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
 
     try {
         const requestedPreviewIds = selectedPreviewIds();
-        const data = await postImage(file, requestedPreviewIds, SINGLE_REQUEST_TIMEOUT_MS, 0);  // No retries for single images
+        const data = await postImage(file, requestedPreviewIds, SINGLE_REQUEST_TIMEOUT_MS, 0, null, getAnalysisSettingsSnapshot());  // No retries for single images
         
         if (data.success) {
             status.innerText = "Success";
@@ -824,10 +880,11 @@ function formatDuration(ms) {
     return `${m}:${s}`;
 }
 
-function makeBatchState(files) {
+function makeBatchState(files, settings) {
     return {
         id: ++batchRunCounter,
         files: Array.from(files),
+        settings,
         nextIndex: 0,
         completed: 0,
         successCount: 0,
@@ -878,6 +935,19 @@ function updateBatchControls(batch) {
     stopBtn.style.display = ownsUi && batch.running ? "inline-block" : "none";
     resumeBtn.style.display = ownsUi && !batch.running && !batch.finished && batch.nextIndex < batch.files.length ? "inline-block" : "none";
     downloadBtn.style.display = ownsUi && !batch.running && batch.successCount > 0 ? "inline-block" : "none";
+    updateAnalysisSettingsLock();
+}
+
+function isAnalysisSettingsLocked() {
+    return Boolean(activeBatch && !activeBatch.finished && activeBatch.nextIndex < activeBatch.files.length);
+}
+
+function updateAnalysisSettingsLock() {
+    const card = document.getElementById("analysis-settings-card");
+    const fieldset = document.getElementById("analysis-settings-fieldset");
+    const locked = isAnalysisSettingsLocked();
+    if (fieldset) fieldset.disabled = locked;
+    if (card) card.classList.toggle("settings-locked", locked);
 }
 
 function stopActiveBatch(reason = "stopped") {
@@ -895,6 +965,7 @@ function stopActiveBatch(reason = "stopped") {
         }
         batch.elapsedMs = batchElapsedMs(batch);
         batch.running = false;
+        updateAnalysisSettingsLock();
         return;
     }
     updateBatchControls(batch);
@@ -915,7 +986,7 @@ function finishBatch(batch, mode) {
     const timerDiv = document.getElementById("batch-timer");
     const chartsContainer = document.getElementById("histograms-container");
     const remaining = Math.max(batch.files.length - batch.nextIndex, 0);
-    const excludedText = batch.pixelScaleCount > 0 ? ` ${batch.pixelScaleCount} pixel-scale row(s) ignored for spatial metrics.` : "";
+    const excludedText = "";
 
     if (timerDiv) {
         timerDiv.style.display = "block";
@@ -1094,7 +1165,7 @@ async function runBatch(batch) {
 
         batch.abortController = new AbortController();
         try {
-            const data = await postBulkImage(file, selectedPreviewIds(), batch.abortController.signal);
+            const data = await postBulkImage(file, selectedPreviewIds(), batch.abortController.signal, batch.settings);
             batch.abortController = null;
             if (!isActiveBatch(batch)) return;
             if (batch.stopRequested) break;
@@ -1134,8 +1205,9 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     const table = document.getElementById("bulk-table");
     const chartsContainer = document.getElementById("histograms-container");
     const timerDiv = document.getElementById("batch-timer");
-    const batch = makeBatchState(files);
+    const batch = makeBatchState(files, getAnalysisSettingsSnapshot());
     activeBatch = batch;
+    updateAnalysisSettingsLock();
 
     chartsContainer.innerHTML = "";
     table.style.display = "table";
