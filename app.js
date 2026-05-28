@@ -128,26 +128,23 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
         if (externalSignal?.aborted) throw new Error("Batch stopped");
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        let timedOut = false;
+        const timeoutId = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, timeoutMs);
         const abortFromExternal = () => controller.abort();
         externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
 
         try {
-            // Strict timeout wrapper
-            const fetchPromise = fetch(processUrl(previewIds, includeLineOcr), {
+            const response = await fetch(processUrl(previewIds, includeLineOcr), {
                 method: "POST",
                 body: formData,
                 signal: controller.signal
             });
 
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("Timeout")), timeoutMs)
-            );
-
-            const response = await Promise.race([fetchPromise, timeoutPromise]);
-            clearTimeout(timeoutId);
-
             const text = await response.text();
+            clearTimeout(timeoutId);
             
             let data;
             try {
@@ -171,7 +168,7 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
                 throw new Error("Batch stopped");
             }
             
-            const isTimeout = err.name === "AbortError" || err.message === "Timeout";
+            const isTimeout = timedOut || err.name === "AbortError" || err.message === "Timeout";
             
             // If we are out of retries, throw the error
             if (attempt === maxRetries) {
@@ -238,7 +235,7 @@ function previewColumn(id, label, field) {
         histogram: false,
         csv: false,
         get: () => null,
-        html: (item) => item.data[field]
+        html: (item) => item.data?.[field]
             ? `<img src="data:image/jpeg;base64,${item.data[field]}" class="thumb preview-img">`
             : `<span class="muted">-</span>`
     };
@@ -251,23 +248,23 @@ const COLUMN_GROUPS = [
         children: [
             {
                 id: "experimental_raw",
-                label: "Raw Features",
+                label: "Cleanup Features",
                 columns: [
-                    cmMetricColumn("raw_width", "Width (Raw)", "raw_width", undefined, { histLabel: "Width - Raw (cm)" }),
-                    cmMetricColumn("raw_height", "Height (Raw)", "raw_height", undefined, { histLabel: "Height - Raw (cm)" }),
-                    cmMetricColumn("raw_perimeter", "Perim (Raw)", "raw_perimeter", undefined, { histLabel: "Perim - Raw (cm)" }),
-                    cmMetricColumn("raw_flesh_width", "F.Width (Raw)", "raw_flesh_width", undefined, { histLabel: "F.Width - Raw (cm)" }),
-                    cmMetricColumn("raw_flesh_height", "F.Height (Raw)", "raw_flesh_height", undefined, { histLabel: "F.Height - Raw (cm)" }),
-                    cmMetricColumn("raw_flesh_perimeter", "F.Perim (Raw)", "raw_flesh_perimeter", undefined, { histLabel: "F.Perim - Raw (cm)" }),
-                    cmMetricColumn("raw_rind_thick", "Rind Thick (Raw)", "raw_rind_thick", undefined, { histLabel: "Rind Thick - Raw (cm)" }),
-                    metricColumn("raw_rind_ratio", "Rind Ratio (Raw)", "raw_rind_ratio", 3, { histLabel: "Rind Ratio - Raw" }),
-                    cmMetricColumn("raw_total_area", "Tot Area (Raw)", "raw_total_area", undefined, { histLabel: "Total Area - Raw (cm²)" }),
-                    cmMetricColumn("raw_flesh_area", "Flesh Area (Raw)", "raw_flesh_area", undefined, { histLabel: "Flesh Area - Raw (cm²)" }),
-                    metricColumn("raw_flesh_ratio", "Flesh Rat (Raw)", "raw_flesh_ratio", 3, { histLabel: "Flesh Ratio - Raw" }),
-                    metricColumn("raw_elongation", "Elong (Raw)", "raw_elongation", 3, { histLabel: "Elongation - Raw" }),
-                    metricColumn("raw_asym", "Asym (Raw)", "raw_asym", 3, { histLabel: "Asymmetry - Raw" }),
-                    metricColumn("raw_flesh_asym", "F.Asym (Raw)", "raw_flesh_asym", 3, { histLabel: "Flesh Asym - Raw" }),
-                    metricColumn("raw_circ", "Circ (Raw)", "raw_circ", 3, { histLabel: "Circularity - Raw" })
+                    cmMetricColumn("raw_width", "Width (Cleanup)", "raw_width", undefined, { histLabel: "Width - Cleanup (cm)" }),
+                    cmMetricColumn("raw_height", "Height (Cleanup)", "raw_height", undefined, { histLabel: "Height - Cleanup (cm)" }),
+                    cmMetricColumn("raw_perimeter", "Perim (Cleanup)", "raw_perimeter", undefined, { histLabel: "Perim - Cleanup (cm)" }),
+                    cmMetricColumn("raw_flesh_width", "F.Width (Cleanup)", "raw_flesh_width", undefined, { histLabel: "F.Width - Cleanup (cm)" }),
+                    cmMetricColumn("raw_flesh_height", "F.Height (Cleanup)", "raw_flesh_height", undefined, { histLabel: "F.Height - Cleanup (cm)" }),
+                    cmMetricColumn("raw_flesh_perimeter", "F.Perim (Cleanup)", "raw_flesh_perimeter", undefined, { histLabel: "F.Perim - Cleanup (cm)" }),
+                    cmMetricColumn("raw_rind_thick", "Rind Thick (Cleanup)", "raw_rind_thick", undefined, { histLabel: "Rind Thick - Cleanup (cm)" }),
+                    metricColumn("raw_rind_ratio", "Rind Ratio (Cleanup)", "raw_rind_ratio", 3, { histLabel: "Rind Ratio - Cleanup" }),
+                    cmMetricColumn("raw_total_area", "Tot Area (Cleanup)", "raw_total_area", undefined, { histLabel: "Total Area - Cleanup (cm²)" }),
+                    cmMetricColumn("raw_flesh_area", "Flesh Area (Cleanup)", "raw_flesh_area", undefined, { histLabel: "Flesh Area - Cleanup (cm²)" }),
+                    metricColumn("raw_flesh_ratio", "Flesh Rat (Cleanup)", "raw_flesh_ratio", 3, { histLabel: "Flesh Ratio - Cleanup" }),
+                    metricColumn("raw_elongation", "Elong (Cleanup)", "raw_elongation", 3, { histLabel: "Elongation - Cleanup" }),
+                    metricColumn("raw_asym", "Asym (Cleanup)", "raw_asym", 3, { histLabel: "Asymmetry - Cleanup" }),
+                    metricColumn("raw_flesh_asym", "F.Asym (Cleanup)", "raw_flesh_asym", 3, { histLabel: "Flesh Asym - Cleanup" }),
+                    metricColumn("raw_circ", "Circ (Cleanup)", "raw_circ", 3, { histLabel: "Circularity - Cleanup" })
                 ]
             },
             {
@@ -949,7 +946,24 @@ function addBatchResult(batch, file, data) {
         globalBatchResults.push({ file_name: file.name, data, included: true, isCm, digits, notes, success: true });
     } else {
         batch.failureCount++;
-        globalBatchResults.push({ file_name: file.name, success: false, message: `Error: ${data.message || "Unknown error"}` });
+        const msg = `Error: ${data.message || "Unknown error"}`;
+        globalBatchResults.push({
+            file_name: file.name,
+            data: {
+                filename: file.name,
+                warnings: [msg],
+                processing_ms: null,
+                processing_ms_timeout: false
+            },
+            included: false,
+            isCm: false,
+            allowPixelMetrics: false,
+            digits: 0,
+            notes: msg,
+            success: false,
+            includeFailedMetrics: false,
+            message: msg
+        });
     }
 }
 
@@ -991,7 +1005,12 @@ function renderTableHeader() {
 
 function renderCell(column, item) {
     if (column.html) {
-        return column.html(item);
+        try {
+            return column.html(item);
+        } catch (err) {
+            console.warn(`Could not render column ${column.id}`, err);
+            return `<span class="muted">-</span>`;
+        }
     }
 
     const value = columnValue(column, item);
@@ -1021,7 +1040,7 @@ function renderBulkTable() {
             if (!item.included) tr.classList.add("excluded-row");
             tr.innerHTML = `
                 <td><input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}"></td>
-                <td>${escapeHtml(item.data.filename || item.file_name)}
+                <td>${escapeHtml(item.data?.filename || item.file_name)}
                     ${item.notes ? `<span title="${escapeHtml(item.notes)}" style="display:inline-block; width:18px; height:18px; background:#ffc107; color:#000; border-radius:50%; text-align:center; line-height:18px; font-weight:bold; cursor:help; margin-left:5px; font-size:12px;">!</span>` : ""}
                 </td>
                 ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
