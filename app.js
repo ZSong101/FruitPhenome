@@ -421,7 +421,6 @@ const COLUMN_GROUPS = [
                     previewColumn("image_ocr_dbnet_base64", "Preview (OCR DBNet)", "image_ocr_dbnet_base64"),
                     previewColumn("image_checker_debug_base64", "Preview (Checker Debug)", "image_checker_debug_base64"),
                     previewColumn("image_checker_mcc_base64", "Preview (Checker MCC)", "image_checker_mcc_base64"),
-                    previewColumn("image_checker_grid_base64", "Preview (Checker Grid)", "image_checker_grid_base64"),
                     previewColumn("image_checker_roi_mcc_base64", "Preview (Checker ROI MCC)", "image_checker_roi_mcc_base64"),
                     previewColumn("image_checker_final_base64", "Preview (Checker Final)", "image_checker_final_base64"),
                     previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
