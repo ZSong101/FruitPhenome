@@ -6,6 +6,7 @@ let API_URL = "https://PPAL-SongLab-UGA-watermelon-proxy.hf.space/proxy_process"
 const SINGLE_REQUEST_TIMEOUT_MS = 120000; // 2 minutes
 const BULK_REQUEST_TIMEOUT_MS = 40000;
 const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
+const BULK_RETRY_MESSAGE = "Taking longer than 40 seconds. Trying again...";
 const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621315d0";
 
 let currentPassword = ""; // Stores the password in memory after a successful login
@@ -249,8 +250,12 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
 }
 
 async function postBulkImage(file, previewIds, externalSignal = null, settings = null, includeLineOcr = null) {
-    // 40 second timeout, no retry; the batch moves on promptly.
+    // 40 second timeout. The batch loop owns the one visible retry pass.
     return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, settings, includeLineOcr);
+}
+
+function isBulkTimeoutError(err) {
+    return err?.message === BULK_TIMEOUT_MESSAGE;
 }
 
 function previewCell(data) {
@@ -419,10 +424,6 @@ const COLUMN_GROUPS = [
                 label: "Standard Previews",
                 columns: [
                     previewColumn("image_ocr_dbnet_base64", "Preview (OCR DBNet)", "image_ocr_dbnet_base64"),
-                    previewColumn("image_checker_debug_base64", "Preview (Checker Debug)", "image_checker_debug_base64"),
-                    previewColumn("image_checker_mcc_base64", "Preview (Checker MCC)", "image_checker_mcc_base64"),
-                    previewColumn("image_checker_roi_mcc_base64", "Preview (Checker ROI MCC)", "image_checker_roi_mcc_base64"),
-                    previewColumn("image_checker_final_base64", "Preview (Checker Final)", "image_checker_final_base64"),
                     previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
                     previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
                     previewColumn("image_cleanup_hybrid_base64", "Preview (Cleanup)", "image_cleanup_hybrid_base64"),
@@ -472,31 +473,10 @@ const ALL_COLUMN_IDS = ALL_COLUMNS.map(column => column.id);
 const COLUMN_BY_ID = new Map(ALL_COLUMNS.map(column => [column.id, column]));
 const COLUMN_GROUP_MAP = collectGroups(COLUMN_GROUPS);
 let visibleColumnIds = new Set(ALL_COLUMNS.map(column => column.id));
-let columnOrderIds = loadColumnOrderIds();
+let columnOrderIds = [...ALL_COLUMN_IDS];
 let draggedColumnId = null;
 let latestSingleData = null;
 let latestSinglePreviewIds = [];
-
-function loadColumnOrderIds() {
-    const fallback = [...ALL_COLUMN_IDS];
-    try {
-        const parsed = JSON.parse(localStorage.getItem("watermelonColumnOrder") || "[]");
-        if (!Array.isArray(parsed)) return fallback;
-        const saved = parsed.filter(id => ALL_COLUMN_IDS.includes(id));
-        const missing = ALL_COLUMN_IDS.filter(id => !saved.includes(id));
-        return [...saved, ...missing];
-    } catch (err) {
-        return fallback;
-    }
-}
-
-function saveColumnOrderIds() {
-    try {
-        localStorage.setItem("watermelonColumnOrder", JSON.stringify(columnOrderIds));
-    } catch (err) {
-        // Non-critical: column order still works for the current session.
-    }
-}
 
 function orderedColumns(columns) {
     const ids = new Set(columns.map(column => column.id));
@@ -516,7 +496,6 @@ function reorderColumnIds(draggedId, targetId, insertAfter = false) {
     if (insertAfter) targetIndex += 1;
     nextOrder.splice(targetIndex, 0, draggedId);
     columnOrderIds = nextOrder;
-    saveColumnOrderIds();
     return true;
 }
 
@@ -1045,19 +1024,33 @@ function finishBatch(batch, mode) {
     rebuildHistograms(chartsContainer);
 }
 
-function addBatchResult(batch, file, data) {
+function batchResultItem(file, data) {
+    const isCm = measurementUnit(data) === "cm";
+    const digits = isCm ? 1 : 0;
+    const notes = rowNotes(data);
+    return { file_name: file.name, data, included: true, isCm, digits, notes, success: true };
+}
+
+function setBatchResultItem(item, replaceIndex = null) {
+    if (replaceIndex !== null && replaceIndex >= 0 && replaceIndex < globalBatchResults.length) {
+        globalBatchResults[replaceIndex] = item;
+        return replaceIndex;
+    }
+    globalBatchResults.push(item);
+    return globalBatchResults.length - 1;
+}
+
+function addBatchResult(batch, file, data, replaceIndex = null) {
     if (data.success) {
         batch.successCount++;
-        const isCm = measurementUnit(data) === "cm";
-        const digits = isCm ? 1 : 0;
-        const notes = rowNotes(data);
-        if (!isCm) batch.pixelScaleCount++;
+        const item = batchResultItem(file, data);
+        if (!item.isCm) batch.pixelScaleCount++;
 
-        globalBatchResults.push({ file_name: file.name, data, included: true, isCm, digits, notes, success: true });
+        setBatchResultItem(item, replaceIndex);
     } else {
         batch.failureCount++;
         const msg = `Error: ${data.message || "Unknown error"}`;
-        globalBatchResults.push({
+        setBatchResultItem({
             file_name: file.name,
             data: {
                 filename: file.name,
@@ -1073,13 +1066,42 @@ function addBatchResult(batch, file, data) {
             success: false,
             includeFailedMetrics: false,
             message: msg
-        });
+        }, replaceIndex);
     }
 }
 
-function addBatchFailure(batch, file, err) {
+function addBatchRetrying(file) {
+    const data = {
+        filename: file.name,
+        warnings: [BULK_RETRY_MESSAGE],
+        processing_ms: BULK_REQUEST_TIMEOUT_MS + 1,
+        processing_ms_timeout: true
+    };
+    globalBatchResults.push({
+        file_name: file.name,
+        data,
+        included: false,
+        isCm: false,
+        allowPixelMetrics: true,
+        digits: 0,
+        notes: BULK_RETRY_MESSAGE,
+        success: false,
+        retrying: true,
+        includeFailedMetrics: true,
+        message: BULK_RETRY_MESSAGE
+    });
+    return globalBatchResults.length - 1;
+}
+
+function removeBatchPlaceholder(index) {
+    if (index !== null && index >= 0 && index < globalBatchResults.length && globalBatchResults[index]?.retrying) {
+        globalBatchResults.splice(index, 1);
+    }
+}
+
+function addBatchFailure(batch, file, err, replaceIndex = null) {
     batch.failureCount++;
-    const isTimeout = err.message === BULK_TIMEOUT_MESSAGE;
+    const isTimeout = isBulkTimeoutError(err);
     const msg = isTimeout ? BULK_TIMEOUT_MESSAGE : `API Error: ${err.message}`;
     const data = {
         filename: file.name,
@@ -1087,7 +1109,7 @@ function addBatchFailure(batch, file, err) {
         processing_ms: isTimeout ? BULK_REQUEST_TIMEOUT_MS + 1 : null,
         processing_ms_timeout: isTimeout
     };
-    globalBatchResults.push({
+    setBatchResultItem({
         file_name: file.name,
         data,
         included: isTimeout,
@@ -1098,7 +1120,7 @@ function addBatchFailure(batch, file, err) {
         success: false,
         includeFailedMetrics: isTimeout,
         message: msg
-    });
+    }, replaceIndex);
 }
 
 function renderTableHeader() {
@@ -1155,6 +1177,15 @@ function renderBulkTable() {
                 </td>
                 ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
             `;
+        } else if (item.retrying) {
+            tr.classList.add("retry-row");
+            tr.innerHTML = `
+                <td>-</td>
+                <td>${escapeHtml(item.file_name)}
+                    <span class="retry-message">${escapeHtml(item.message)}</span>
+                </td>
+                ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
+            `;
         } else {
             if (!item.included) tr.classList.add("excluded-row");
             const includeCell = item.includeFailedMetrics
@@ -1180,7 +1211,7 @@ async function warmUpBatch(batch, status) {
         if (!isActiveBatch(batch) || batch.stopRequested) break;
 
         const file = batch.files[i];
-        status.innerText = `Warming up server (${i + 1}/${warmupCount})...`;
+        status.innerText = `Warming up server (${i + 1}/${warmupCount})... (Won't take more than 2 minutes)`;
         batch.abortController = new AbortController();
 
         try {
@@ -1230,11 +1261,11 @@ async function runBatch(batch) {
         const index = batch.nextIndex;
         const file = batch.files[index];
         status.innerText = `${batch.completed > 0 ? "Processing" : "Starting"} image ${index + 1} of ${batch.files.length}...`;
+        const previewIds = selectedPreviewIds();
+        const runLineOcr = batch.requestLineOcr || shouldRequestLineOcr(previewIds, batch.settings);
 
         batch.abortController = new AbortController();
         try {
-            const previewIds = selectedPreviewIds();
-            const runLineOcr = batch.requestLineOcr || shouldRequestLineOcr(previewIds, batch.settings);
             const data = await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr);
             batch.abortController = null;
             if (!isActiveBatch(batch)) return;
@@ -1244,7 +1275,42 @@ async function runBatch(batch) {
             batch.abortController = null;
             if (!isActiveBatch(batch)) return;
             if (batch.stopRequested || err.message === "Batch stopped") break;
-            addBatchFailure(batch, file, err);
+
+            if (!isBulkTimeoutError(err)) {
+                addBatchFailure(batch, file, err);
+            } else {
+                const retryIndex = addBatchRetrying(file);
+                status.innerText = `Image ${index + 1} of ${batch.files.length}: ${BULK_RETRY_MESSAGE}`;
+                refreshBatchOutputs(chartsContainer);
+
+                if (batch.stopRequested) {
+                    removeBatchPlaceholder(retryIndex);
+                    refreshBatchOutputs(chartsContainer);
+                    break;
+                }
+
+                batch.abortController = new AbortController();
+                try {
+                    const retryData = await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr);
+                    batch.abortController = null;
+                    if (!isActiveBatch(batch)) return;
+                    if (batch.stopRequested) {
+                        removeBatchPlaceholder(retryIndex);
+                        refreshBatchOutputs(chartsContainer);
+                        break;
+                    }
+                    addBatchResult(batch, file, retryData, retryIndex);
+                } catch (retryErr) {
+                    batch.abortController = null;
+                    if (!isActiveBatch(batch)) return;
+                    if (batch.stopRequested || retryErr.message === "Batch stopped") {
+                        removeBatchPlaceholder(retryIndex);
+                        refreshBatchOutputs(chartsContainer);
+                        break;
+                    }
+                    addBatchFailure(batch, file, retryErr, retryIndex);
+                }
+            }
         }
 
         batch.completed++;
