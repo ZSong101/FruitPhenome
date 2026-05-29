@@ -248,9 +248,9 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
     }
 }
 
-async function postBulkImage(file, previewIds, externalSignal = null, settings = null) {
+async function postBulkImage(file, previewIds, externalSignal = null, settings = null, includeLineOcr = null) {
     // 40 second timeout, no retry; the batch moves on promptly.
-    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, settings);
+    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, settings, includeLineOcr);
 }
 
 function previewCell(data) {
@@ -906,11 +906,12 @@ function formatDuration(ms) {
     return `${m}:${s}`;
 }
 
-function makeBatchState(files, settings) {
+function makeBatchState(files, settings, requestLineOcr) {
     return {
         id: ++batchRunCounter,
         files: Array.from(files),
         settings,
+        requestLineOcr,
         nextIndex: 0,
         completed: 0,
         successCount: 0,
@@ -1191,7 +1192,9 @@ async function runBatch(batch) {
 
         batch.abortController = new AbortController();
         try {
-            const data = await postBulkImage(file, selectedPreviewIds(), batch.abortController.signal, batch.settings);
+            const previewIds = selectedPreviewIds();
+            const runLineOcr = batch.requestLineOcr || shouldRequestLineOcr(previewIds, batch.settings);
+            const data = await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr);
             batch.abortController = null;
             if (!isActiveBatch(batch)) return;
             if (batch.stopRequested) break;
@@ -1231,7 +1234,8 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     const table = document.getElementById("bulk-table");
     const chartsContainer = document.getElementById("histograms-container");
     const timerDiv = document.getElementById("batch-timer");
-    const batch = makeBatchState(files, getAnalysisSettingsSnapshot());
+    const batchSettings = getAnalysisSettingsSnapshot();
+    const batch = makeBatchState(files, batchSettings, shouldRequestLineOcr(selectedPreviewIds(), batchSettings));
     activeBatch = batch;
     updateAnalysisSettingsLock();
 
