@@ -898,6 +898,7 @@ let globalBatchResults = []; // Stores all row data for dynamic toggling
 let activeBatch = null;
 let batchRunCounter = 0;
 const BATCH_PAUSE_MS = 500;
+const BATCH_WARMUP_COUNT = 2;
 
 function formatDuration(ms) {
     const elapsedSec = Math.floor(ms / 1000);
@@ -923,6 +924,7 @@ function makeBatchState(files, settings, requestLineOcr) {
         abortController: null,
         running: false,
         finished: false,
+        warmupComplete: false,
         stopRequested: false,
         stopReason: null
     };
@@ -1166,6 +1168,39 @@ function renderBulkTable() {
     });
 }
 
+async function warmUpBatch(batch, status) {
+    if (batch.warmupComplete || batch.nextIndex !== 0 || batch.files.length === 0) return;
+
+    const warmupCount = Math.min(BATCH_WARMUP_COUNT, batch.files.length);
+    for (let i = 0; i < warmupCount; i++) {
+        if (!isActiveBatch(batch) || batch.stopRequested) break;
+
+        const file = batch.files[i];
+        status.innerText = `Warming up server (${i + 1}/${warmupCount})...`;
+        batch.abortController = new AbortController();
+
+        try {
+            const previewIds = selectedPreviewIds();
+            const runLineOcr = batch.requestLineOcr || shouldRequestLineOcr(previewIds, batch.settings);
+            await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr);
+        } catch (err) {
+            if (!isActiveBatch(batch)) return;
+            if (batch.stopRequested || err.message === "Batch stopped") break;
+            console.warn(`Warmup request ignored for ${file.name}: ${err.message}`);
+        } finally {
+            batch.abortController = null;
+        }
+
+        if (i + 1 < warmupCount) {
+            await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
+        }
+    }
+
+    if (isActiveBatch(batch) && !batch.stopRequested) {
+        batch.warmupComplete = true;
+    }
+}
+
 async function runBatch(batch) {
     const status = document.getElementById("bulk-status");
     const chartsContainer = document.getElementById("histograms-container");
@@ -1182,6 +1217,8 @@ async function runBatch(batch) {
     batch.timerInterval = setInterval(() => {
         if (isActiveBatch(batch) && batch.running) updateBatchTimer(batch);
     }, 1000);
+
+    await warmUpBatch(batch, status);
 
     while (batch.nextIndex < batch.files.length) {
         if (!isActiveBatch(batch) || batch.stopRequested) break;
