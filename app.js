@@ -353,6 +353,8 @@ const COLUMN_GROUPS = [
                     metricColumn("sm_asym", "Asym (Sm)", "sm_asym", 3, { histLabel: "Asymmetry (Sm)" }),
                     metricColumn("sm_flesh_asym", "F.Asym (Sm)", "sm_flesh_asym", 3, { histLabel: "Flesh Asym (Sm)" }),
                     metricColumn("sm_circ", "Circ (Sm)", "sm_circ", 3, { histLabel: "Circularity (Sm)" }),
+                    metricColumn("sm_proximal_angle", "Prox Angle (Sm) (deg)", "sm_proximal_angle", 1, { histLabel: "Proximal Angle (Sm) (deg)" }),
+                    metricColumn("sm_distal_angle", "Dist Angle (Sm) (deg)", "sm_distal_angle", 1, { histLabel: "Distal Angle (Sm) (deg)" }),
                     metricColumn("midline_curvature", "Midline Curve", "midline_curvature", 4)
                 ]
             },
@@ -360,6 +362,7 @@ const COLUMN_GROUPS = [
                 id: "experimental_color",
                 label: "Color Calibration",
                 columns: [
+                    metricColumn("color_calibration_confidence", "Cal Confidence", "color_calibration_confidence", 3, { histLabel: "Color Calibration Confidence", csvLabel: "Color Calibration Confidence" }),
                     metricColumn("delta_e_initial", "Init ΔE", "delta_e_initial", 2, { histLabel: "Initial ΔE" }),
                     metricColumn("delta_e_final", "Final ΔE", "delta_e_final", 2, { histLabel: "Final ΔE" })
                 ]
@@ -885,9 +888,10 @@ const BATCH_WARMUP_COUNT = 2;
 
 function formatDuration(ms) {
     const elapsedSec = Math.floor(ms / 1000);
-    const m = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+    const h = String(Math.floor(elapsedSec / 3600)).padStart(2, '0');
+    const m = String(Math.floor((elapsedSec % 3600) / 60)).padStart(2, '0');
     const s = String(elapsedSec % 60).padStart(2, '0');
-    return `${m}:${s}`;
+    return `${h}:${m}:${s}`;
 }
 
 function makeBatchState(files, settings, requestLineOcr) {
@@ -1351,7 +1355,7 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     document.getElementById("bulk-section").classList.add("bulk-card");
     if (timerDiv) {
         timerDiv.style.display = "block";
-        timerDiv.innerText = "Elapsed: 00:00 | ETA: Calculating...";
+        timerDiv.innerText = "Elapsed: 00:00:00 | ETA: Calculating...";
     }
 
     globalBatchResults = [];
