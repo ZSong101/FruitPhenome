@@ -1211,7 +1211,7 @@ async function warmUpBatch(batch, status) {
         if (!isActiveBatch(batch) || batch.stopRequested) break;
 
         const file = batch.files[i];
-        status.innerText = `Warming up server (${i + 1}/${warmupCount})... (Won't take more than 2 minutes)`;
+        status.innerText = `Warming up server (${i + 1}/${warmupCount})... (Won't take more than 80 seconds)`;
         batch.abortController = new AbortController();
 
         try {
