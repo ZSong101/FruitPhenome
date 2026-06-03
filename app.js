@@ -113,7 +113,7 @@ function measurementUnit(data) {
     if (data.measurement_unit) return data.measurement_unit;
     return "cm";
 }
-
+ 
 function areaUnit(data) {
     if (data.area_unit === "cm2") return "cm²";
     return "cm²";
