@@ -26,6 +26,7 @@ h1 {
 .app-header h1 {
   margin: 0;
   line-height: 1.1;
+  font-family: Georgia, "Times New Roman", serif;
 }
 
 .app-logo {

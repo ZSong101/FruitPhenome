@@ -159,6 +159,26 @@ function rowNotes(data) {
     return notes.join(" | ");
 }
 
+function processingLogText(itemOrData) {
+    const item = itemOrData && "data" in itemOrData ? itemOrData : null;
+    const data = item ? (item.data || {}) : (itemOrData || {});
+    const entries = [];
+
+    if (item?.message) entries.push(item.message);
+    else if (data.success === false && data.message) entries.push(`Error: ${data.message}`);
+
+    const notes = rowNotes(data);
+    if (notes) entries.push(notes);
+
+    return [...new Set(entries.filter(Boolean))].join(" | ");
+}
+
+function renderProcessingLogCell(item) {
+    const log = processingLogText(item);
+    const className = `processing-log-cell${item.success === false ? " error-log" : ""}`;
+    return `<td class="${className}">${log ? escapeHtml(log) : `<span class="muted">N/A</span>`}</td>`;
+}
+
 function sliderNumber(id, fallback) {
     const el = document.getElementById(id);
     const value = Number(el?.value);
@@ -431,49 +451,49 @@ const COLUMN_GROUPS = [
     },
     {
         id: "traditional",
-        label: "Traditional",
+        label: "Traditional (TA)",
         children: [
             {
                 id: "traditional_shape_index",
-                label: "Shape Index",
+                label: "Shape Index (TA)",
                 columns: [
-                    metricColumn("trad_shape_index_i", "fs I H/W", "trad_shape_index_i", 3),
-                    metricColumn("trad_shape_index_ii", "fs II Hm/Wm", "trad_shape_index_ii", 3),
-                    metricColumn("trad_triangle", "Triangle w1/w2", "trad_triangle", 3)
+                    metricColumn("trad_shape_index_i", "fs I H/W (TA)", "trad_shape_index_i", 3),
+                    metricColumn("trad_shape_index_ii", "fs II Hm/Wm (TA)", "trad_shape_index_ii", 3),
+                    metricColumn("trad_triangle", "Triangle w1/w2 (TA)", "trad_triangle", 3)
                 ]
             },
             {
                 id: "traditional_eccentric",
-                label: "Eccentricity & Asymmetry",
+                label: "Eccentricity & Asymmetry (TA)",
                 columns: [
-                    metricColumn("trad_obovoid", "Obovoid", "trad_obovoid", 3),
-                    metricColumn("trad_ovoid", "Ovoid", "trad_ovoid", 3),
-                    metricColumn("trad_horizontal_asymmetry", "Horiz Asym", "trad_horizontal_asymmetry", 4),
-                    metricColumn("trad_vertical_asymmetry", "Vert Asym", "trad_vertical_asymmetry", 4)
+                    metricColumn("trad_obovoid", "Obovoid (TA)", "trad_obovoid", 3),
+                    metricColumn("trad_ovoid", "Ovoid (TA)", "trad_ovoid", 3),
+                    metricColumn("trad_horizontal_asymmetry", "Horiz Asym (TA)", "trad_horizontal_asymmetry", 4),
+                    metricColumn("trad_vertical_asymmetry", "Vert Asym (TA)", "trad_vertical_asymmetry", 4)
                 ]
             },
             {
                 id: "traditional_end_shape",
-                label: "End Shape",
+                label: "End Shape (TA)",
                 columns: [
-                    metricColumn("trad_distal_angle", "Distal Angle (deg)", "trad_distal_angle", 1),
-                    metricColumn("trad_distal_blockiness", "Distal Blockiness", "trad_distal_blockiness", 3),
-                    metricColumn("trad_distal_indentation_area", "Distal Indent Area", "trad_distal_indentation_area", 4),
-                    metricColumn("trad_proximal_angle", "Proximal Angle (deg)", "trad_proximal_angle", 1),
-                    metricColumn("trad_proximal_blockiness", "Proximal Blockiness", "trad_proximal_blockiness", 3),
-                    metricColumn("trad_proximal_shoulder_height", "Shoulder Height", "trad_proximal_shoulder_height", 4),
-                    metricColumn("trad_proximal_indentation_area", "Proximal Indent Area", "trad_proximal_indentation_area", 4)
+                    metricColumn("trad_distal_angle", "Distal Angle (TA) (deg)", "trad_distal_angle", 1),
+                    metricColumn("trad_distal_blockiness", "Distal Blockiness (TA)", "trad_distal_blockiness", 3),
+                    metricColumn("trad_distal_indentation_area", "Distal Indent Area (TA)", "trad_distal_indentation_area", 4),
+                    metricColumn("trad_proximal_angle", "Proximal Angle (TA) (deg)", "trad_proximal_angle", 1),
+                    metricColumn("trad_proximal_blockiness", "Proximal Blockiness (TA)", "trad_proximal_blockiness", 3),
+                    metricColumn("trad_proximal_shoulder_height", "Shoulder Height (TA)", "trad_proximal_shoulder_height", 4),
+                    metricColumn("trad_proximal_indentation_area", "Proximal Indent Area (TA)", "trad_proximal_indentation_area", 4)
                 ]
             },
             {
                 id: "traditional_fit",
-                label: "Common Shape Fit",
+                label: "Common Shape Fit (TA)",
                 columns: [
-                    metricColumn("trad_circular_r2", "Circular R²", "trad_circular_r2", 4, { csvLabel: "Circular R2" }),
-                    metricColumn("trad_ellipsoid_r2", "Ellipsoid R²", "trad_ellipsoid_r2", 4, { csvLabel: "Ellipsoid R2" }),
-                    metricColumn("trad_taperness", "Heart Taperness", "trad_taperness", 3),
-                    metricColumn("trad_heart", "Heart Score", "trad_heart", 3),
-                    metricColumn("trad_rectangularity", "Rectangularity", "trad_rectangularity", 4)
+                    metricColumn("trad_circular_r2", "Circular R² (TA)", "trad_circular_r2", 4, { csvLabel: "Circular R2 (TA)" }),
+                    metricColumn("trad_ellipsoid_r2", "Ellipsoid R² (TA)", "trad_ellipsoid_r2", 4, { csvLabel: "Ellipsoid R2 (TA)" }),
+                    metricColumn("trad_taperness", "Heart Taperness (TA)", "trad_taperness", 3),
+                    metricColumn("trad_heart", "Heart Score (TA)", "trad_heart", 3),
+                    metricColumn("trad_rectangularity", "Rectangularity (TA)", "trad_rectangularity", 4)
                 ]
             }
         ]
@@ -491,7 +511,7 @@ const COLUMN_GROUPS = [
                     previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
                     previewColumn("image_cleanup_hybrid_base64", "Preview (Cleanup)", "image_cleanup_hybrid_base64"),
                     previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64"),
-                    previewColumn("image_traditional_base64", "Preview (Traditional)", "image_traditional_base64")
+                    previewColumn("image_traditional_base64", "Preview (Traditional) (TA)", "image_traditional_base64")
                 ]
             }
         ]
@@ -517,14 +537,18 @@ const GROUP_HELP_TEXT = {
     experimental_raw: "Cleanup features are measured from the cleaned segmentation masks after artifact removal and mask smoothing. These values are not from the original raw YOLO masks.",
     experimental_smoothed: "Smoothed features are measured from the fitted perimeter and flesh functions. They are useful when you want less sensitivity to jagged mask edges.",
     experimental_color: "Color calibration diagnostics describe whether the ColorChecker-based correction was reliable and how much the patch colors changed.",
-    traditional: "Traditional features are boundary-based morphology descriptors modeled after Tomato Analyzer-style fruit shape measurements.",
-    traditional_shape_index: "Shape index features describe whether the fruit is elongated, squat, triangular, or balanced in height and width.",
-    traditional_eccentric: "These features describe whether the widest portion is shifted toward one end and how asymmetric the shape is across horizontal or vertical axes.",
-    traditional_end_shape: "End-shape features describe proximal and distal tip angles, blockiness, and indentation using the user-adjustable settings in Analysis Settings.",
-    traditional_fit: "Common-shape features compare the cleaned fruit boundary to simple geometric or named fruit-shape templates.",
+    traditional: "Traditional (TA) features are boundary-based morphology descriptors modeled after Tomato Analyzer fruit shape measurements. All features marked with (TA) are derived from Tomato Analyzer.",
+    traditional_shape_index: "Shape index features (TA) describe whether the fruit is elongated, squat, triangular, or balanced in height and width.",
+    traditional_eccentric: "Eccentricity and asymmetry features (TA) describe whether the widest portion is shifted toward one end and how asymmetric the shape is across horizontal or vertical axes.",
+    traditional_end_shape: "End-shape features (TA) describe proximal and distal tip angles, blockiness, and indentation using the user-adjustable settings in Analysis Settings.",
+    traditional_fit: "Common-shape fit features (TA) compare the cleaned fruit boundary to simple geometric or named fruit-shape templates.",
     previews: "Preview columns return diagnostic images. They are excluded from histograms and CSV downloads.",
     previews_standard: "Standard previews show the OCR, calibration, mask cleanup, smoothing, and traditional-feature overlays requested for each image.",
     run_info: "Run information columns describe OCR metadata and processing time rather than fruit morphology."
+};
+
+const GROUP_HELP_HTML = {
+    traditional: `Traditional (TA) features are boundary-based morphology descriptors modeled after <a href="https://vanderknaaplab.uga.edu/tomato-analyzer/" target="_blank" rel="noopener noreferrer">Tomato Analyzer</a> fruit shape measurements. All features marked with (TA) are derived from Tomato Analyzer.`
 };
 
 const COLUMN_HELP_TEXT = {
@@ -566,31 +590,31 @@ const COLUMN_HELP_TEXT = {
     color_calibration_confidence: "Overall confidence score for ColorChecker-based calibration. Low values suggest that scale or color correction should be inspected.",
     delta_e_initial: "Average ColorChecker color error before correction. Smaller values mean the uncorrected image already matched the reference more closely.",
     delta_e_final: "Average ColorChecker color error after correction. Smaller values indicate a better final match to the reference patches.",
-    trad_shape_index_i: "Traditional fruit shape index I, calculated as maximum height divided by maximum width. Values above 1 are elongated and values below 1 are squat.",
-    trad_shape_index_ii: "Traditional fruit shape index II, calculated as mid-height divided by mid-width. It is a center-cross-section version of the height-to-width ratio.",
-    trad_triangle: "Proximal width divided by distal width using the selected end-width positions. Values above 1 mean the proximal end is wider than the distal end.",
-    trad_obovoid: "Score for bottom-heavy shape based on where the widest width occurs. It increases when the widest point is shifted toward the distal half.",
-    trad_ovoid: "Score for top-heavy shape based on where the widest width occurs. It increases when the widest point is shifted toward the proximal half.",
-    trad_horizontal_asymmetry: "Average vertical midpoint shift across fruit columns relative to the horizontal center. Larger values indicate stronger top-bottom asymmetry.",
-    trad_vertical_asymmetry: "Average horizontal midpoint shift across fruit rows relative to the vertical center. Larger values indicate stronger left-right asymmetry.",
-    trad_distal_angle: "Boundary-based distal endpoint angle in degrees, using the selected angle sample span. It describes whether the distal tip is pointed, flat, convex, or concave relative to the fruit center.",
-    trad_distal_blockiness: "Distal-end width divided by mid-width. Larger values indicate a boxier distal end.",
-    trad_distal_indentation_area: "Distal indentation area divided by total fruit area. Higher values indicate a larger concavity or notch at the distal end.",
-    trad_proximal_angle: "Boundary-based proximal endpoint angle in degrees, using the selected angle sample span. It describes the stem-end shape relative to the fruit center.",
-    trad_proximal_blockiness: "Proximal-end width divided by mid-width. Larger values indicate a boxier proximal end.",
-    trad_proximal_shoulder_height: "Relative shoulder height around the proximal indentation. Higher values indicate deeper shoulders around the proximal notch.",
-    trad_proximal_indentation_area: "Proximal indentation area divided by total fruit area. Higher values indicate a larger stem-end concavity.",
-    trad_circular_r2: "Regression-style fit precision for a circle fit to the fruit boundary. Values closer to 1 indicate a more circle-like shape.",
-    trad_ellipsoid_r2: "Regression-style fit precision for an ellipse fit to the fruit boundary. Values closer to 1 indicate a more ellipse-like shape.",
-    trad_taperness: "Heart-shape taperness component based on average width above and below the widest point. It increases when the two ends taper differently.",
-    trad_heart: "Composite heart-shape score combining widest-point position, taperness, and proximal shoulder height. Larger values indicate a more heart-like outline by this descriptor.",
-    trad_rectangularity: "Ratio of maximum inscribed rectangle area to minimum enclosing rectangle area. Values closer to 1 indicate a more rectangular fruit outline.",
+    trad_shape_index_i: "Tomato Analyzer (TA) fruit shape index I, calculated as maximum height divided by maximum width. Values above 1 are elongated and values below 1 are squat.",
+    trad_shape_index_ii: "Tomato Analyzer (TA) fruit shape index II, calculated as mid-height divided by mid-width. It is a center-cross-section version of the height-to-width ratio.",
+    trad_triangle: "Tomato Analyzer (TA) proximal width divided by distal width using the selected end-width positions. Values above 1 mean the proximal end is wider than the distal end.",
+    trad_obovoid: "Tomato Analyzer (TA) score for bottom-heavy shape based on where the widest width occurs. It increases when the widest point is shifted toward the distal half.",
+    trad_ovoid: "Tomato Analyzer (TA) score for top-heavy shape based on where the widest width occurs. It increases when the widest point is shifted toward the proximal half.",
+    trad_horizontal_asymmetry: "Tomato Analyzer (TA) average vertical midpoint shift across fruit columns relative to the horizontal center. Larger values indicate stronger top-bottom asymmetry.",
+    trad_vertical_asymmetry: "Tomato Analyzer (TA) average horizontal midpoint shift across fruit rows relative to the vertical center. Larger values indicate stronger left-right asymmetry.",
+    trad_distal_angle: "Tomato Analyzer (TA) boundary-based distal endpoint angle in degrees, using the selected angle sample span. It describes whether the distal tip is pointed, flat, convex, or concave relative to the fruit center.",
+    trad_distal_blockiness: "Tomato Analyzer (TA) distal-end width divided by mid-width. Larger values indicate a boxier distal end.",
+    trad_distal_indentation_area: "Tomato Analyzer (TA) distal indentation area divided by total fruit area. Higher values indicate a larger concavity or notch at the distal end.",
+    trad_proximal_angle: "Tomato Analyzer (TA) boundary-based proximal endpoint angle in degrees, using the selected angle sample span. It describes the stem-end shape relative to the fruit center.",
+    trad_proximal_blockiness: "Tomato Analyzer (TA) proximal-end width divided by mid-width. Larger values indicate a boxier proximal end.",
+    trad_proximal_shoulder_height: "Tomato Analyzer (TA) relative shoulder height around the proximal indentation. Higher values indicate deeper shoulders around the proximal notch.",
+    trad_proximal_indentation_area: "Tomato Analyzer (TA) proximal indentation area divided by total fruit area. Higher values indicate a larger stem-end concavity.",
+    trad_circular_r2: "Tomato Analyzer (TA) regression-style fit precision for a circle fit to the fruit boundary. Values closer to 1 indicate a more circle-like shape.",
+    trad_ellipsoid_r2: "Tomato Analyzer (TA) regression-style fit precision for an ellipse fit to the fruit boundary. Values closer to 1 indicate a more ellipse-like shape.",
+    trad_taperness: "Tomato Analyzer (TA) heart-shape taperness component based on average width above and below the widest point. It increases when the two ends taper differently.",
+    trad_heart: "Tomato Analyzer (TA) composite heart-shape score combining widest-point position, taperness, and proximal shoulder height. Larger values indicate a more heart-like outline by this descriptor.",
+    trad_rectangularity: "Tomato Analyzer (TA) ratio of maximum inscribed rectangle area to minimum enclosing rectangle area. Values closer to 1 indicate a more rectangular fruit outline.",
     image_ocr_dbnet_base64: "Diagnostic OCR preview showing DBNet text boxes, candidate reads, confidences, and selected Line when OCR is requested. It helps diagnose Line detection errors.",
     image_pre_calibration_base64: "Image before color calibration, with ColorChecker overlay when available. It is the first visual check for checker detection and scale calibration.",
     image_raw_base64: "Raw model-output preview retained for diagnosis. It shows the original predicted masks before cleanup is used for measurement.",
     image_cleanup_hybrid_base64: "Cleanup preview showing processed masks, raw mask outlines, axes, midline, and ColorChecker overlay. These cleaned masks feed the main measurements.",
     image_sm_base64: "Smoothed preview showing fitted fruit and flesh curves plus smoothed endpoint angle geometry. It helps verify the function-fit measurements.",
-    image_traditional_base64: "Traditional preview showing Tomato Analyzer-style overlays such as axes, widths, angles, circle, ellipse, and indentation areas. It helps audit the traditional descriptors.",
+    image_traditional_base64: "Traditional (TA) preview showing Tomato Analyzer-style overlays such as axes, widths, angles, circle, ellipse, and indentation areas. It helps audit the Tomato Analyzer (TA) descriptors.",
     line: "Short Line ID detected from text in the image, optionally constrained by the Possible Lines list. It may contain letters, numbers, dashes, or underscores.",
     line_confidence: "Confidence score for the selected Line read or matched Line option. Lower values should be checked manually.",
     line_orientation: "Image rotation inferred from the selected OCR read and used for mask generation when text is detected. A value of 0 means no rotation was applied.",
@@ -799,10 +823,11 @@ function renderColumnHelp() {
 
     const renderGroup = (group, depth = 0) => {
         const groupText = GROUP_HELP_TEXT[group.id] || "";
+        const groupHtml = GROUP_HELP_HTML[group.id] || (groupText ? escapeHtml(groupText) : "");
         return `
             <details class="help-group help-depth-${depth}" open>
                 <summary>${escapeHtml(group.label)}</summary>
-                ${groupText ? `<p class="help-group-text">${escapeHtml(groupText)}</p>` : ""}
+                ${groupHtml ? `<p class="help-group-text">${groupHtml}</p>` : ""}
                 <div class="help-children">
                     ${(group.children || []).map(child => renderGroup(child, depth + 1)).join("")}
                     ${group.columns && group.columns.length ? renderEntries(group.columns) : ""}
@@ -1091,8 +1116,13 @@ function renderSingleAnalysis(data, previewIds = []) {
         .filter(group => group.id !== "previews")
         .map(group => renderSingleMetricGroups(group, item))
         .join("");
+    const log = processingLogText(item);
+    const logCard = log
+        ? `<div class="result-card"><h3>Processing Log</h3><p class="processing-log-cell">${escapeHtml(log)}</p></div>`
+        : "";
 
     return `
+        ${logCard}
         ${metricCards}
         ${renderSinglePreviewCards(data, previewIds)}
     `;
@@ -1108,9 +1138,9 @@ function renderCurrentSingleAnalysis() {
         return;
     }
 
-    const notes = rowNotes(latestSingleData);
-    const notesHtml = notes
-        ? `<div class="result-card"><h3>Notes</h3><p>${escapeHtml(notes)}</p></div>`
+    const log = processingLogText(latestSingleData);
+    const notesHtml = log
+        ? `<div class="result-card"><h3>Processing Log</h3><p class="processing-log-cell">${escapeHtml(log)}</p></div>`
         : "";
     resultDiv.innerHTML = `${notesHtml}${renderSinglePreviewCards(latestSingleData, previewIds)}`;
 }
@@ -1151,10 +1181,10 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
         } else {
             latestSingleData = data;
             latestSinglePreviewIds = requestedPreviewIds;
-            const notes = rowNotes(data);
             status.innerText = `Error: ${data.message}`;
-            const notesHtml = notes
-                ? `<div class="result-card"><h3>Notes</h3><p>${escapeHtml(notes)}</p></div>`
+            const log = processingLogText(data);
+            const notesHtml = log
+                ? `<div class="result-card"><h3>Processing Log</h3><p class="processing-log-cell">${escapeHtml(log)}</p></div>`
                 : "";
             resultDiv.innerHTML = `${notesHtml}${renderSinglePreviewCards(data, requestedPreviewIds)}`;
         }
@@ -1417,6 +1447,12 @@ function addBatchFailure(batch, file, err, replaceIndex = null) {
     }, replaceIndex);
 }
 
+function warningBadge(notes) {
+    return notes
+        ? `<span title="${escapeHtml(notes)}" style="display:inline-block; width:18px; height:18px; background:#ffc107; color:#000; border-radius:50%; text-align:center; line-height:18px; font-weight:bold; cursor:help; margin-left:5px; font-size:12px;">!</span>`
+        : "";
+}
+
 function renderTableHeader() {
     const table = document.getElementById("bulk-table");
     const thead = table.querySelector("thead");
@@ -1424,6 +1460,12 @@ function renderTableHeader() {
         <tr>
             <th>Include</th>
             <th>Filename</th>
+            <th class="processing-log-cell">
+                <span class="column-title-wrap">
+                    <span>Processing Log</span>
+                    <span class="column-help-icon" title="Warnings and errors produced while processing this image. If no warnings or errors were reported, this shows N/A.">?</span>
+                </span>
+            </th>
             ${visibleColumns().map(column => `
                 <th class="draggable-column-header" draggable="true" data-column-id="${column.id}">
                     <span class="column-title-wrap">
@@ -1475,17 +1517,17 @@ function renderBulkTable() {
             tr.innerHTML = `
                 <td><input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}"></td>
                 <td>${escapeHtml(item.data?.filename || item.file_name)}
-                    ${item.notes ? `<span title="${escapeHtml(item.notes)}" style="display:inline-block; width:18px; height:18px; background:#ffc107; color:#000; border-radius:50%; text-align:center; line-height:18px; font-weight:bold; cursor:help; margin-left:5px; font-size:12px;">!</span>` : ""}
+                    ${warningBadge(item.notes)}
                 </td>
+                ${renderProcessingLogCell(item)}
                 ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
             `;
         } else if (item.retrying) {
             tr.classList.add("retry-row");
             tr.innerHTML = `
                 <td>-</td>
-                <td>${escapeHtml(item.file_name)}
-                    <span class="retry-message">${escapeHtml(item.message)}</span>
-                </td>
+                <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
+                ${renderProcessingLogCell(item)}
                 ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
             `;
         } else {
@@ -1495,9 +1537,8 @@ function renderBulkTable() {
                 : "-";
             tr.innerHTML = `
                 <td>${includeCell}</td>
-                <td>${escapeHtml(item.file_name)}
-                    <span style="color:red; margin-left:6px;">${escapeHtml(item.message)}</span>
-                </td>
+                <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
+                ${renderProcessingLogCell(item)}
                 ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}" style="color:${item.includeFailedMetrics ? "inherit" : "red"};">${renderCell(column, item)}</td>`).join("")}
             `;
         }
@@ -1851,12 +1892,12 @@ function csvEscape(value) {
 
 document.getElementById("download-csv-btn").addEventListener("click", () => {
     const columns = visibleColumns().filter(column => column.csv !== false);
-    const header = ["Filename", ...columns.map(column => column.csvLabel || column.label)];
+    const header = ["Filename", "Processing Log", ...columns.map(column => column.csvLabel || column.label)];
     const rows = [header.map(csvEscape).join(",")];
 
     globalBatchResults.forEach(item => {
         if (!item.included || (!item.success && !item.includeFailedMetrics)) return;
-        const values = [item.data.filename || item.file_name];
+        const values = [item.data.filename || item.file_name, processingLogText(item) || "N/A"];
         columns.forEach(column => {
             const value = columnValue(column, item);
             const csvValue = column.csvValue ? column.csvValue(value, item) : value;
