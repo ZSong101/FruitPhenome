@@ -11,6 +11,36 @@ const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621
 
 let currentPassword = ""; // Stores the password in memory after a successful login
 let currentUsername = ""; // Stores user identity
+let currentSessionId = "";
+
+function makeClientId(prefix = "id") {
+    if (window.crypto?.randomUUID) return `${prefix}_${window.crypto.randomUUID()}`;
+    return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function proxyBaseUrl() {
+    return API_URL.replace(/\/(proxy_process|process_single).*$/, "");
+}
+
+function usesProxyApi() {
+    return API_URL.includes("/proxy_process");
+}
+
+function batchStageUrl() {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_batch_stage" : "batch_stage"}`;
+}
+
+function previewUrlBase() {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_preview" : "preview"}`;
+}
+
+function clearSessionUrl() {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_preview_session_clear" : "preview_session/clear"}`;
+}
+
+function safeClientToken(value) {
+    return String(value || "").replace(/[^0-9A-Za-z_.-]+/g, "_").slice(0, 64).replace(/^[_\-.]+|[_\-.]+$/g, "") || "row";
+}
 
 function setLastUpdatedStamp() {
     const stamp = document.getElementById("last-updated-stamp");
@@ -85,6 +115,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     if (await sha256(pwd) === TARGET_HASH) {
         currentPassword = pwd;
         currentUsername = uname;
+        currentSessionId = makeClientId("session");
         console.log(`Logged in as ${currentUsername}. Sending traffic via Proxy.`);
         document.getElementById("login-view").style.display = "none";
         document.getElementById("app-view").style.display = "block";
@@ -313,13 +344,17 @@ function setupAnalysisSettingsControls() {
     });
 }
 
-async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null, settings = null, includeLineOcr = null) {
+async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null, settings = null, includeLineOcr = null, rowId = null, requestedColumnIdsOverride = null) {
     const requestSettings = settings || getAnalysisSettingsSnapshot();
+    const requestColumnIds = requestedColumnIdsOverride || selectedColumnIdsForRequest();
     const runLineOcr = includeLineOcr ?? shouldRequestLineOcr(previewIds, requestSettings);
     const formData = new FormData();
     formData.append("password", currentPassword);
     formData.append("username", currentUsername); 
     formData.append("file", file);
+    formData.append("session_id", currentSessionId);
+    if (rowId) formData.append("row_id", rowId);
+    formData.append("requested_columns", JSON.stringify(requestColumnIds));
     appendAnalysisSettings(formData, requestSettings);
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -386,9 +421,9 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
     }
 }
 
-async function postBulkImage(file, previewIds, externalSignal = null, settings = null, includeLineOcr = null) {
+async function postBulkImage(file, previewIds, externalSignal = null, settings = null, includeLineOcr = null, rowId = null, requestedColumnIdsOverride = null) {
     // 40 second timeout. The batch loop owns the one visible retry pass.
-    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, settings, includeLineOcr);
+    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, settings, includeLineOcr, rowId, requestedColumnIdsOverride);
 }
 
 function isBulkTimeoutError(err) {
@@ -458,9 +493,19 @@ function previewColumn(id, label, field) {
         histogram: false,
         csv: false,
         get: () => null,
-        html: (item) => item.data?.[field]
-            ? `<img src="data:image/jpeg;base64,${item.data[field]}" class="thumb preview-img">`
-            : `<span class="muted">-</span>`
+        html: (item) => {
+            if (item.data?.[field]) {
+                return `<img src="data:image/jpeg;base64,${item.data[field]}" class="thumb preview-img">`;
+            }
+            const thumbUrl = previewFetchUrl(item.data, field, "thumb");
+            const fullUrl = previewFetchUrl(item.data, field, "full");
+            if (thumbUrl) {
+                return `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" class="thumb preview-img">`;
+            }
+            return itemHasPendingColumn(item, id)
+                ? `<span class="muted">Computing...</span>`
+                : `<span class="muted">-</span>`;
+        }
     };
 }
 
@@ -730,6 +775,12 @@ let latestSinglePreviewIds = [];
 
 const ALWAYS_DEFAULT_COLUMN_IDS = ["processing_ms"];
 const OCR_COLUMN_IDS = ["line", "line_confidence", "line_orientation"];
+const RAW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_raw"));
+const SMOOTH_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_smoothed"));
+const TRADITIONAL_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("traditional"));
+const COLOR_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_color"));
+const PREVIEW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("previews_standard"));
+const OCR_STAGE_COLUMN_IDS = new Set([...OCR_COLUMN_IDS, "image_ocr_dbnet_base64", "image_line_ocr_base64"]);
 
 function columnIdsForGroup(groupId) {
     const group = COLUMN_GROUP_MAP.get(groupId);
@@ -930,6 +981,43 @@ function visiblePreviewColumns() {
 
 function selectedPreviewIds() {
     return visiblePreviewColumns().map(column => column.id);
+}
+
+function selectedColumnIdsForRequest() {
+    const ids = new Set([...visibleColumnIds, ...ALWAYS_DEFAULT_COLUMN_IDS]);
+    return ALL_COLUMN_IDS.filter(id => ids.has(id));
+}
+
+function stageForColumnId(id) {
+    if (OCR_STAGE_COLUMN_IDS.has(id)) return "ocr";
+    if (COLOR_STAGE_COLUMN_IDS.has(id) || id === "image_pre_calibration_base64") return "color";
+    if (SMOOTH_STAGE_COLUMN_IDS.has(id) || id === "image_sm_base64") return "smoothing";
+    if (TRADITIONAL_STAGE_COLUMN_IDS.has(id) || id === "image_traditional_base64") return "traditional";
+    if (RAW_STAGE_COLUMN_IDS.has(id) || id === "image_raw_base64" || id === "image_cleanup_hybrid_base64") return "cleanup";
+    return null;
+}
+
+function itemCompletedStages(item) {
+    return new Set(Array.isArray(item?.data?.completed_stages) ? item.data.completed_stages : []);
+}
+
+function itemHasPendingColumn(item, columnId) {
+    const stage = stageForColumnId(columnId);
+    return Boolean(
+        item?.pendingColumnIds instanceof Set && item.pendingColumnIds.has(columnId)
+        || (stage && item?.pendingStages instanceof Set && item.pendingStages.has(stage))
+    );
+}
+
+function previewFetchUrl(data, previewType, size = "thumb") {
+    if (!data?.session_id || !data?.row_id) return "";
+    if (!data.preview_refs?.[previewType]?.available) return "";
+    const params = new URLSearchParams({
+        username: currentUsername,
+        size,
+        _t: String(data.updated_at || "")
+    });
+    return `${previewUrlBase()}/${encodeURIComponent(data.session_id)}/${encodeURIComponent(data.row_id)}/${encodeURIComponent(previewType)}?${params.toString()}`;
 }
 
 function columnValue(column, item) {
@@ -1189,6 +1277,7 @@ function syncVisibleOutputs() {
     applyMetricColumnUnitLabels();
     refreshBatchOutputs(document.getElementById("histograms-container"));
     renderCurrentSingleAnalysis();
+    scheduleMissingStageRequest();
 }
 
 function setupColumnControls() {
@@ -1286,12 +1375,16 @@ function renderSinglePreviewCards(data, previewIds) {
 
     return previews.map(column => {
         const imageData = data[column.id];
+        const thumbUrl = previewFetchUrl(data, column.id, "thumb");
+        const fullUrl = previewFetchUrl(data, column.id, "full");
         return `
             <div class="result-card single-preview-card">
                 <h3>${escapeHtml(column.label)}</h3>
                 ${imageData
                     ? `<img src="data:image/jpeg;base64,${imageData}" class="preview-img single-preview-img">`
-                    : `<span class="muted">Preview unavailable</span>`}
+                    : thumbUrl
+                        ? `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" class="preview-img single-preview-img">`
+                        : `<span class="muted">Preview unavailable</span>`}
             </div>
         `;
     }).join("");
@@ -1416,6 +1509,8 @@ function makeBatchState(files, settings, requestLineOcr) {
         files: Array.from(files),
         settings,
         requestLineOcr,
+        sessionId: currentSessionId,
+        rowIds: [],
         nextIndex: 0,
         completed: 0,
         successCount: 0,
@@ -1431,6 +1526,13 @@ function makeBatchState(files, settings, requestLineOcr) {
         stopRequested: false,
         stopReason: null
     };
+}
+
+function batchRowId(batch, index, file) {
+    if (!batch.rowIds[index]) {
+        batch.rowIds[index] = `batch_${batch.id}_row_${index}_${safeClientToken(file?.name || index)}`;
+    }
+    return batch.rowIds[index];
 }
 
 function isActiveBatch(batch) {
@@ -1649,6 +1751,140 @@ function addBatchFailure(batch, file, err, replaceIndex = null) {
     }, replaceIndex);
 }
 
+let missingStageTimer = null;
+let missingStageInFlight = false;
+let missingStageQueued = false;
+
+function isPreviewColumnId(id) {
+    return PREVIEW_STAGE_COLUMN_IDS.has(id);
+}
+
+function stageAllowedBySettings(stage, settings) {
+    return true;
+}
+
+function itemNeedsColumn(item, columnId, batch) {
+    if (!item?.data?.session_id || !item?.data?.row_id || item.retrying) return false;
+    if (item.unavailableColumnIds instanceof Set && item.unavailableColumnIds.has(columnId)) return false;
+    const stage = stageForColumnId(columnId);
+    if (!stage || !stageAllowedBySettings(stage, batch?.settings || getAnalysisSettingsSnapshot())) return false;
+
+    if (isPreviewColumnId(columnId)) {
+        return !(item.data?.[columnId] || item.data?.preview_refs?.[columnId]?.available);
+    }
+
+    if (columnId === "processing_ms") return false;
+    return !itemCompletedStages(item).has(stage);
+}
+
+function missingColumnsForItem(item, batch, columnIds) {
+    return columnIds.filter(id => itemNeedsColumn(item, id, batch));
+}
+
+async function postBatchStage(rowIds, requestedColumnIds, batch) {
+    const response = await fetch(batchStageUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            password: currentPassword,
+            username: currentUsername,
+            session_id: batch.sessionId || currentSessionId,
+            row_ids: rowIds,
+            requested_columns: requestedColumnIds,
+            settings: batch.settings || getAnalysisSettingsSnapshot()
+        })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) {
+        throw new Error(data.message || `HTTP ${response.status}`);
+    }
+    return data;
+}
+
+function mergeStagePatch(rowPatch) {
+    const rowId = rowPatch?.row_id;
+    if (!rowId) return;
+    const item = globalBatchResults.find(candidate => candidate.data?.row_id === rowId);
+    if (!item) return;
+
+    item.data = { ...(item.data || {}), ...rowPatch };
+    item.success = item.data.success !== false;
+    item.isCm = measurementUnit(item.data) === "cm";
+    item.digits = item.isCm ? 1 : 0;
+    item.notes = rowNotes(item.data);
+}
+
+function markUnavailableMissingColumns(item, requestedIds) {
+    const missing = requestedIds.filter(id => itemNeedsColumn(item, id, activeBatch));
+    if (missing.length === 0) return;
+    if (!(item.unavailableColumnIds instanceof Set)) item.unavailableColumnIds = new Set();
+    missing.forEach(id => item.unavailableColumnIds.add(id));
+}
+
+function scheduleMissingStageRequest() {
+    if (!activeBatch || globalBatchResults.length === 0) return;
+    clearTimeout(missingStageTimer);
+    missingStageTimer = setTimeout(runMissingStageRequest, 150);
+}
+
+async function runMissingStageRequest() {
+    if (missingStageInFlight) {
+        missingStageQueued = true;
+        return;
+    }
+    const batch = activeBatch;
+    if (!batch) return;
+
+    const requestedIds = selectedColumnIdsForRequest();
+    const entries = globalBatchResults
+        .map(item => ({ item, missing: missingColumnsForItem(item, batch, requestedIds) }))
+        .filter(entry => entry.missing.length > 0);
+    if (entries.length === 0) return;
+
+    missingStageInFlight = true;
+    entries.forEach(({ item, missing }) => {
+        item.pendingColumnIds = new Set([...(item.pendingColumnIds || []), ...missing]);
+        item.pendingStages = new Set([...(item.pendingStages || []), ...missing.map(stageForColumnId).filter(Boolean)]);
+    });
+    refreshBatchOutputs(document.getElementById("histograms-container"));
+
+    try {
+        const chunkSize = 4;
+        for (let i = 0; i < entries.length; i += chunkSize) {
+            const chunk = entries.slice(i, i + chunkSize);
+            try {
+                const rowIds = chunk.map(entry => entry.item.data.row_id);
+                const response = await postBatchStage(rowIds, requestedIds, batch);
+                (response.rows || []).forEach(mergeStagePatch);
+                chunk.forEach(({ item }) => {
+                    item.pendingColumnIds = new Set();
+                    item.pendingStages = new Set();
+                    markUnavailableMissingColumns(item, requestedIds);
+                });
+            } catch (err) {
+                chunk.forEach(({ item }) => {
+                    item.pendingColumnIds = new Set();
+                    item.pendingStages = new Set();
+                    const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
+                    item.data = {
+                        ...(item.data || {}),
+                        warnings: [...warnings, `On-demand stage request failed: ${err.message}`]
+                    };
+                    item.notes = rowNotes(item.data);
+                });
+            }
+            refreshBatchOutputs(document.getElementById("histograms-container"));
+        }
+    } finally {
+        missingStageInFlight = false;
+        refreshBatchOutputs(document.getElementById("histograms-container"));
+        if (missingStageQueued) {
+            missingStageQueued = false;
+            scheduleMissingStageRequest();
+        }
+    }
+}
+
 function warningBadge(notes) {
     return notes
         ? `<span title="${escapeHtml(notes)}" style="display:inline-block; width:18px; height:18px; background:#ffc107; color:#000; border-radius:50%; text-align:center; line-height:18px; font-weight:bold; cursor:help; margin-left:5px; font-size:12px;">!</span>`
@@ -1692,6 +1928,9 @@ function renderCell(column, item) {
     }
 
     const value = columnValue(column, item);
+    if ((value === null || value === undefined || value === "") && itemHasPendingColumn(item, column.id)) {
+        return `<span class="muted">Computing...</span>`;
+    }
     if (column.display) {
         return escapeHtml(column.display(value, item));
     }
@@ -1806,13 +2045,14 @@ async function runBatch(batch) {
 
         const index = batch.nextIndex;
         const file = batch.files[index];
+        const rowId = batchRowId(batch, index, file);
         status.innerText = `${batch.completed > 0 ? "Processing" : "Starting"} image ${index + 1} of ${batch.files.length}...`;
         const previewIds = selectedPreviewIds();
         const runLineOcr = batch.requestLineOcr || shouldRequestLineOcr(previewIds, batch.settings);
 
         batch.abortController = new AbortController();
         try {
-            const data = await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr);
+            const data = await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr, rowId);
             batch.abortController = null;
             if (!isActiveBatch(batch)) return;
             if (batch.stopRequested) break;
@@ -1837,7 +2077,7 @@ async function runBatch(batch) {
 
                 batch.abortController = new AbortController();
                 try {
-                    const retryData = await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr);
+                    const retryData = await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr, rowId);
                     batch.abortController = null;
                     if (!isActiveBatch(batch)) return;
                     if (batch.stopRequested) {
@@ -2137,7 +2377,7 @@ const lightboxClose = document.getElementById("lightbox-close");
 document.body.addEventListener("click", (e) => {
     if (e.target && e.target.classList.contains("preview-img")) {
         lightbox.style.display = "flex";
-        lightboxImg.src = e.target.src;
+        lightboxImg.src = e.target.dataset.fullSrc || e.target.src;
     }
 });
 
@@ -2154,6 +2394,18 @@ lightbox.addEventListener("click", (e) => {
         lightboxImg.src = "";
     }
 });
+
+function clearPreviewSessionBeacon() {
+    if (!currentSessionId) return;
+    const payload = JSON.stringify({
+        session_id: currentSessionId,
+        username: currentUsername
+    });
+    const blob = new Blob([payload], { type: "application/json" });
+    navigator.sendBeacon?.(clearSessionUrl(), blob);
+}
+
+window.addEventListener("pagehide", clearPreviewSessionBeacon);
 
 // --- LIVE QUEUE POLLING ---
 function startQueuePolling() {
