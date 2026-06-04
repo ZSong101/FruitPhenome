@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Phenotyping</title>
+  <title>Specialty Crop Fruit Phenotyping</title>
   <link rel="icon" href="data:,">
   <script>
     window.APP_ASSET_VERSION = Date.now().toString();
@@ -36,9 +36,9 @@
     .muted { color: #666; font-size: 13px; }
     .bulk-card { width: min(1680px, calc(100vw - 48px)); max-width: none; margin-left: 50%; transform: translateX(-50%); box-sizing: border-box; }
     .table-wrap { width: 100%; overflow-x: auto; margin-top: 20px; padding-bottom: 6px; }
-    #download-csv-btn { display: none; margin-top: 15px; margin-bottom: 10px; padding: 10px 15px; font-weight: bold; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+    #download-csv-btn { display: none; font-weight: bold; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
     #download-csv-btn:hover { background: #0056b3; }
-    #stop-batch-btn, #resume-batch-btn { display: none; margin-top: 15px; margin-bottom: 10px; padding: 10px 15px; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; }
+    #stop-batch-btn, #resume-batch-btn { display: none; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; }
     #stop-batch-btn { background: #c7362f; }
     #stop-batch-btn:hover { background: #a82c27; }
     #resume-batch-btn { background: #5f6f7a; }
@@ -58,7 +58,8 @@
     .column-dragging { opacity: 0.45; }
     .column-drop-target { outline: 2px solid #1170ff; outline-offset: -2px; background: #eaf2ff !important; }
     .bulk-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
-    .column-dropdown { position: relative; display: inline-block; }
+    .column-dropdown { position: relative; display: inline-flex; align-items: center; }
+    .bulk-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
     #column-menu-button { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding-right: 28px; position: relative; }
     #column-menu-button::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #4a5963; }
     #column-menu-button:hover { background: #e1e6eb; }
@@ -111,13 +112,23 @@
 
   <!-- THE MAIN APP (Hidden by default) -->
   <main id="app-view" class="container" style="display: none;">
-    <h1>Phenotyping</h1>
+    <header class="app-header">
+      <h1>Specialty Crop Fruit Phenotyping</h1>
+      <img class="app-logo" src="lab_logo_matched.png" alt="Lab logo">
+    </header>
 
     <!-- SERVER QUEUE DASHBOARD -->
     <div id="server-status" style="background: #e9ecef; padding: 10px; border-radius: 5px; margin-bottom: 20px; text-align: center; font-weight: bold; color: #555; transition: all 0.3s;">
       Connecting to server...
     </div>
 
+    <nav class="app-tabs" role="tablist" aria-label="Phenotyping workflow">
+      <button type="button" class="tab-button active" id="settings-tab" role="tab" aria-selected="true" aria-controls="settings-panel" data-tab-target="settings-panel">Analysis Settings</button>
+      <button type="button" class="tab-button" id="single-tab" role="tab" aria-selected="false" aria-controls="single-panel" data-tab-target="single-panel">Single Image Analysis</button>
+      <button type="button" class="tab-button" id="bulk-tab" role="tab" aria-selected="false" aria-controls="bulk-panel" data-tab-target="bulk-panel">Bulk Image Analysis</button>
+    </nav>
+
+    <div class="tab-panel active" id="settings-panel" role="tabpanel" aria-labelledby="settings-tab">
     <section id="analysis-settings-card" class="card settings-panel">
       <h2>Analysis Settings</h2>
       <fieldset id="analysis-settings-fieldset" class="settings-fieldset">
@@ -170,7 +181,9 @@
       </fieldset>
       <p class="muted settings-lock-note">Settings are locked for the current batch so resumed images use the same values.</p>
     </section>
+    </div>
     
+    <div class="tab-panel" id="single-panel" role="tabpanel" aria-labelledby="single-tab">
     <section class="card">
       <h2>Single Image Analysis</h2>
       <form id="single-form">
@@ -180,7 +193,9 @@
       <div id="single-status" class="status"></div>
       <div id="single-result" class="result-grid"></div>
     </section>
+    </div>
 
+    <div class="tab-panel" id="bulk-panel" role="tabpanel" aria-labelledby="bulk-tab">
     <section id="bulk-section" class="card">
       <h2>Bulk Image Analysis</h2>
       <form id="bulk-form">
@@ -212,6 +227,7 @@
       
       <div id="histograms-container" class="charts-container"></div>
     </section>
+    </div>
 
     <footer id="last-updated-stamp" class="app-footer">Last updated: loading...</footer>
   </main>

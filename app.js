@@ -35,7 +35,38 @@ function setLastUpdatedStamp() {
     stamp.innerText = `Last updated: ${date} at ${time}`;
 }
 
+function activateTab(targetId) {
+    document.querySelectorAll(".tab-button").forEach(button => {
+        const active = button.dataset.tabTarget === targetId;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+
+    document.querySelectorAll(".tab-panel").forEach(panel => {
+        panel.classList.toggle("active", panel.id === targetId);
+    });
+}
+
+function initAppTabs() {
+    const buttons = document.querySelectorAll(".tab-button");
+    if (!buttons.length) return;
+
+    buttons.forEach(button => {
+        button.addEventListener("click", () => activateTab(button.dataset.tabTarget));
+        button.addEventListener("keydown", (event) => {
+            if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+            event.preventDefault();
+            const ordered = Array.from(buttons);
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            const next = ordered[(ordered.indexOf(button) + direction + ordered.length) % ordered.length];
+            next.focus();
+            activateTab(next.dataset.tabTarget);
+        });
+    });
+}
+
 setLastUpdatedStamp();
+initAppTabs();
 
 async function sha256(message) {
     const msgBuffer = new TextEncoder().encode(message);
@@ -831,11 +862,20 @@ function renderSingleAnalysis(data, previewIds = []) {
 }
 
 function renderCurrentSingleAnalysis() {
-    if (!latestSingleData?.success) return;
+    if (!latestSingleData) return;
     const resultDiv = document.getElementById("single-result");
     if (!resultDiv) return;
     const previewIds = selectedPreviewIds().filter(id => latestSinglePreviewIds.includes(id));
-    resultDiv.innerHTML = renderSingleAnalysis(latestSingleData, previewIds);
+    if (latestSingleData.success) {
+        resultDiv.innerHTML = renderSingleAnalysis(latestSingleData, previewIds);
+        return;
+    }
+
+    const notes = rowNotes(latestSingleData);
+    const notesHtml = notes
+        ? `<div class="result-card"><h3>Notes</h3><p>${escapeHtml(notes)}</p></div>`
+        : "";
+    resultDiv.innerHTML = `${notesHtml}${renderSinglePreviewCards(latestSingleData, previewIds)}`;
 }
 
 document.getElementById("single-form").addEventListener("submit", async (e) => {
@@ -867,11 +907,14 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
 
             resultDiv.innerHTML = renderSingleAnalysis(data, requestedPreviewIds);
         } else {
-            latestSingleData = null;
-            latestSinglePreviewIds = [];
+            latestSingleData = data;
+            latestSinglePreviewIds = requestedPreviewIds;
             const notes = rowNotes(data);
             status.innerText = `Error: ${data.message}`;
-            resultDiv.innerHTML = notes ? `<p><strong>Notes:</strong> ${escapeHtml(notes)}</p>` : "";
+            const notesHtml = notes
+                ? `<div class="result-card"><h3>Notes</h3><p>${escapeHtml(notes)}</p></div>`
+                : "";
+            resultDiv.innerHTML = `${notesHtml}${renderSinglePreviewCards(data, requestedPreviewIds)}`;
         }
     } catch (err) {
         latestSingleData = null;
@@ -948,9 +991,9 @@ function updateBatchControls(batch) {
     if (!stopBtn || !resumeBtn || !downloadBtn) return;
 
     const ownsUi = isActiveBatch(batch);
-    stopBtn.style.display = ownsUi && batch.running ? "inline-block" : "none";
-    resumeBtn.style.display = ownsUi && !batch.running && !batch.finished && batch.nextIndex < batch.files.length ? "inline-block" : "none";
-    downloadBtn.style.display = ownsUi && !batch.running && batch.successCount > 0 ? "inline-block" : "none";
+    stopBtn.style.display = ownsUi && batch.running ? "inline-flex" : "none";
+    resumeBtn.style.display = ownsUi && !batch.running && !batch.finished && batch.nextIndex < batch.files.length ? "inline-flex" : "none";
+    downloadBtn.style.display = ownsUi && !batch.running && batch.successCount > 0 ? "inline-flex" : "none";
     updateAnalysisSettingsLock();
 }
 
@@ -1054,19 +1097,22 @@ function addBatchResult(batch, file, data, replaceIndex = null) {
     } else {
         batch.failureCount++;
         const msg = `Error: ${data.message || "Unknown error"}`;
+        const failureData = {
+            ...data,
+            filename: data.filename || file.name,
+            warnings: Array.isArray(data.warnings) ? data.warnings : [],
+            processing_ms: data.processing_ms ?? null,
+            processing_ms_timeout: Boolean(data.processing_ms_timeout)
+        };
+        const notes = [msg, rowNotes(failureData)].filter(Boolean).join(" | ");
         setBatchResultItem({
             file_name: file.name,
-            data: {
-                filename: file.name,
-                warnings: [msg],
-                processing_ms: null,
-                processing_ms_timeout: false
-            },
+            data: failureData,
             included: false,
             isCm: false,
             allowPixelMetrics: false,
             digits: 0,
-            notes: msg,
+            notes,
             success: false,
             includeFailedMetrics: false,
             message: msg

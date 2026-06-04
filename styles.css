@@ -15,6 +15,68 @@ h1 {
   margin-bottom: 8px;
 }
 
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 14px;
+}
+
+.app-header h1 {
+  margin: 0;
+  line-height: 1.1;
+}
+
+.app-logo {
+  height: clamp(48px, 6vw, 72px);
+  max-width: min(44vw, 320px);
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.app-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 18px 0 12px;
+  border-bottom: 1px solid #d9e1e7;
+}
+
+.tab-button {
+  background: transparent;
+  color: #38454f;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  padding: 10px 14px;
+  font-weight: 700;
+}
+
+.tab-button:hover {
+  background: #e9eef2;
+  color: #1e2a32;
+}
+
+.tab-button.active {
+  background: #fff;
+  color: #1170ff;
+  border-color: #d9e1e7;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+.tab-panel > .card:first-child {
+  margin-top: 0;
+}
+
 .subtitle {
   margin-top: 0;
   color: #4a5963;
@@ -119,6 +181,19 @@ button:hover {
 }
 
 @media (max-width: 760px) {
+  .app-header {
+    align-items: flex-start;
+  }
+
+  .app-logo {
+    height: 48px;
+    max-width: 38vw;
+  }
+
+  .tab-button {
+    flex: 1 1 180px;
+  }
+
   .single-preview-card {
     grid-column: span 1;
   }
