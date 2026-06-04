@@ -165,8 +165,32 @@ function sliderNumber(id, fallback) {
     return Number.isFinite(value) ? value : fallback;
 }
 
+function selectedFruit() {
+    return document.getElementById("fruit-select")?.value || "";
+}
+
+function requireFruitSelection(statusEl) {
+    const fruitSelect = document.getElementById("fruit-select");
+    const fruitStatus = document.getElementById("fruit-select-status");
+    if (fruitSelect?.value === "watermelon") {
+        fruitSelect.classList.remove("input-error");
+        fruitStatus?.classList.remove("visible");
+        return true;
+    }
+
+    if (statusEl) {
+        statusEl.innerText = "Select Fruit is required. Choose Watermelon on the Main tab before processing.";
+    }
+    fruitSelect?.classList.add("input-error");
+    fruitStatus?.classList.add("visible");
+    activateTab("settings-panel");
+    setTimeout(() => fruitSelect?.focus(), 0);
+    return false;
+}
+
 function getAnalysisSettingsSnapshot() {
     return {
+        fruit: selectedFruit(),
         lineOptions: document.getElementById("line-options-input")?.value || "",
         scaleValue: (document.getElementById("scale-value-input")?.value || "").trim(),
         scaleUnit: document.getElementById("scale-unit-select")?.value || "cm_per_px",
@@ -204,6 +228,11 @@ function setupAnalysisSettingsControls() {
     updateSettingsSliderLabels();
     document.querySelectorAll("#analysis-settings-fieldset input[type='range']").forEach(input => {
         input.addEventListener("input", updateSettingsSliderLabels);
+    });
+    document.getElementById("fruit-select")?.addEventListener("change", (event) => {
+        const invalid = event.target.value !== "watermelon";
+        event.target.classList.toggle("input-error", invalid);
+        document.getElementById("fruit-select-status")?.classList.toggle("visible", invalid);
     });
 }
 
@@ -483,6 +512,91 @@ const COLUMN_GROUPS = [
     }
 ];
 
+const GROUP_HELP_TEXT = {
+    experimental: "Measurements derived from the model masks and the app's post-processing pipeline. These are the main outputs for this watermelon workflow.",
+    experimental_raw: "Cleanup features are measured from the cleaned segmentation masks after artifact removal and mask smoothing. These values are not from the original raw YOLO masks.",
+    experimental_smoothed: "Smoothed features are measured from the fitted perimeter and flesh functions. They are useful when you want less sensitivity to jagged mask edges.",
+    experimental_color: "Color calibration diagnostics describe whether the ColorChecker-based correction was reliable and how much the patch colors changed.",
+    traditional: "Traditional features are boundary-based morphology descriptors modeled after Tomato Analyzer-style fruit shape measurements.",
+    traditional_shape_index: "Shape index features describe whether the fruit is elongated, squat, triangular, or balanced in height and width.",
+    traditional_eccentric: "These features describe whether the widest portion is shifted toward one end and how asymmetric the shape is across horizontal or vertical axes.",
+    traditional_end_shape: "End-shape features describe proximal and distal tip angles, blockiness, and indentation using the user-adjustable settings in Analysis Settings.",
+    traditional_fit: "Common-shape features compare the cleaned fruit boundary to simple geometric or named fruit-shape templates.",
+    previews: "Preview columns return diagnostic images. They are excluded from histograms and CSV downloads.",
+    previews_standard: "Standard previews show the OCR, calibration, mask cleanup, smoothing, and traditional-feature overlays requested for each image.",
+    run_info: "Run information columns describe OCR metadata and processing time rather than fruit morphology."
+};
+
+const COLUMN_HELP_TEXT = {
+    raw_width: "Maximum cleaned fruit width in centimeters, measured along the flesh-derived width axis when available. This uses the cleaned mask that feeds the main feature calculations.",
+    raw_height: "Maximum cleaned fruit height in centimeters, measured perpendicular to the width axis. It reflects the target cut-face region after mask cleanup.",
+    raw_perimeter: "Perimeter length of the cleaned whole-fruit boundary in centimeters. This is sensitive to the cleaned contour but not to the later function fit.",
+    raw_flesh_width: "Width of the combined flesh region in centimeters along the same width axis used for the fruit. It estimates the exposed edible area across the cut face.",
+    raw_flesh_height: "Height of the combined flesh region in centimeters along the fruit height axis. It summarizes the vertical extent of the two flesh masks.",
+    raw_flesh_perimeter: "Perimeter of the cleaned combined flesh boundary in centimeters. It is useful for checking how smooth or fragmented the flesh segmentation is.",
+    raw_rind_thick: "Estimated rind thickness in centimeters, calculated from the difference between fruit width and flesh width. It is a two-sided average rather than a local rind measurement.",
+    raw_rind_ratio: "Estimated rind thickness relative to fruit width. Larger values indicate proportionally thicker rind around the cut face.",
+    raw_total_area: "Area of the cleaned target fruit or cut-face mask in square centimeters. This is the primary face-area measurement.",
+    raw_flesh_area: "Area of the cleaned combined flesh masks in square centimeters. It excludes rind and background pixels.",
+    raw_flesh_ratio: "Flesh area divided by total target fruit area. Values closer to 1 mean more of the detected face is flesh.",
+    raw_elongation: "Shape elongation estimated from the cleaned fruit contour. Larger values indicate a longer, narrower shape.",
+    raw_asym: "Left/right imbalance of the cleaned fruit region split by the estimated flesh midline. Values near 0 indicate stronger symmetry.",
+    raw_flesh_asym: "Left/right imbalance of the cleaned flesh masks split by the estimated flesh midline. This helps flag uneven or poorly paired flesh masks.",
+    raw_circ: "Circularity of the cleaned fruit contour based on area and perimeter. Values closer to 1 are more circular.",
+    r2_rind: "Fit quality for the smoothed rind perimeter function. Higher values mean the fitted curve follows the cleaned rind contour more closely.",
+    r2_flesh: "Fit quality for the smoothed flesh function. Higher values mean the fitted curve follows the cleaned flesh boundary more closely.",
+    sm_width: "Fruit width in centimeters measured from the smoothed perimeter function. This reduces sensitivity to small segmentation irregularities.",
+    sm_height: "Fruit height in centimeters measured from the smoothed perimeter function. It is the smoothed counterpart to the cleanup height.",
+    sm_perimeter: "Perimeter length in centimeters of the smoothed fitted fruit boundary. It is usually less jagged than the cleanup perimeter.",
+    sm_flesh_width: "Flesh width in centimeters measured from the smoothed flesh fit. This is useful when flesh mask edges are fragile.",
+    sm_flesh_height: "Flesh height in centimeters measured from the smoothed flesh fit. It summarizes the fitted vertical flesh extent.",
+    sm_flesh_perimeter: "Perimeter length in centimeters of the smoothed flesh fit. It reduces local noise from the raw flesh mask boundary.",
+    sm_rind_thick: "Estimated rind thickness in centimeters using smoothed fruit and flesh widths. It is the smoothed counterpart to cleanup rind thickness.",
+    sm_rind_ratio: "Smoothed rind thickness relative to smoothed fruit width. Larger values indicate proportionally thicker rind.",
+    sm_total_area: "Area in square centimeters enclosed by the smoothed fruit function. It is a regularized estimate of total face area.",
+    sm_flesh_area: "Area in square centimeters enclosed by the smoothed flesh function. It is a regularized estimate of exposed flesh area.",
+    sm_flesh_ratio: "Smoothed flesh area divided by smoothed total fruit area. It is the fitted counterpart to cleanup flesh ratio.",
+    sm_elongation: "Elongation estimated from the smoothed fruit contour. It is less sensitive to mask bumps than cleanup elongation.",
+    sm_asym: "Asymmetry of the smoothed fruit region about the estimated midline. Lower values indicate a more balanced fitted shape.",
+    sm_flesh_asym: "Asymmetry of the smoothed flesh region about the estimated midline. It helps identify uneven flesh halves after smoothing.",
+    sm_circ: "Circularity of the smoothed fruit boundary. Values closer to 1 indicate a more circular fitted fruit shape.",
+    sm_proximal_angle: "Endpoint angle in degrees at the smoothed proximal divot. The angle is derived from the fitted endpoint geometry rather than the raw boundary.",
+    sm_distal_angle: "Endpoint angle in degrees at the smoothed distal divot. It is intended to preserve tip curvature that ordinary smoothing can flatten.",
+    midline_curvature: "Curvature score for the estimated flesh midline. Larger values indicate a more curved midline between the two flesh halves.",
+    color_calibration_confidence: "Overall confidence score for ColorChecker-based calibration. Low values suggest that scale or color correction should be inspected.",
+    delta_e_initial: "Average ColorChecker color error before correction. Smaller values mean the uncorrected image already matched the reference more closely.",
+    delta_e_final: "Average ColorChecker color error after correction. Smaller values indicate a better final match to the reference patches.",
+    trad_shape_index_i: "Traditional fruit shape index I, calculated as maximum height divided by maximum width. Values above 1 are elongated and values below 1 are squat.",
+    trad_shape_index_ii: "Traditional fruit shape index II, calculated as mid-height divided by mid-width. It is a center-cross-section version of the height-to-width ratio.",
+    trad_triangle: "Proximal width divided by distal width using the selected end-width positions. Values above 1 mean the proximal end is wider than the distal end.",
+    trad_obovoid: "Score for bottom-heavy shape based on where the widest width occurs. It increases when the widest point is shifted toward the distal half.",
+    trad_ovoid: "Score for top-heavy shape based on where the widest width occurs. It increases when the widest point is shifted toward the proximal half.",
+    trad_horizontal_asymmetry: "Average vertical midpoint shift across fruit columns relative to the horizontal center. Larger values indicate stronger top-bottom asymmetry.",
+    trad_vertical_asymmetry: "Average horizontal midpoint shift across fruit rows relative to the vertical center. Larger values indicate stronger left-right asymmetry.",
+    trad_distal_angle: "Boundary-based distal endpoint angle in degrees, using the selected angle sample span. It describes whether the distal tip is pointed, flat, convex, or concave relative to the fruit center.",
+    trad_distal_blockiness: "Distal-end width divided by mid-width. Larger values indicate a boxier distal end.",
+    trad_distal_indentation_area: "Distal indentation area divided by total fruit area. Higher values indicate a larger concavity or notch at the distal end.",
+    trad_proximal_angle: "Boundary-based proximal endpoint angle in degrees, using the selected angle sample span. It describes the stem-end shape relative to the fruit center.",
+    trad_proximal_blockiness: "Proximal-end width divided by mid-width. Larger values indicate a boxier proximal end.",
+    trad_proximal_shoulder_height: "Relative shoulder height around the proximal indentation. Higher values indicate deeper shoulders around the proximal notch.",
+    trad_proximal_indentation_area: "Proximal indentation area divided by total fruit area. Higher values indicate a larger stem-end concavity.",
+    trad_circular_r2: "Regression-style fit precision for a circle fit to the fruit boundary. Values closer to 1 indicate a more circle-like shape.",
+    trad_ellipsoid_r2: "Regression-style fit precision for an ellipse fit to the fruit boundary. Values closer to 1 indicate a more ellipse-like shape.",
+    trad_taperness: "Heart-shape taperness component based on average width above and below the widest point. It increases when the two ends taper differently.",
+    trad_heart: "Composite heart-shape score combining widest-point position, taperness, and proximal shoulder height. Larger values indicate a more heart-like outline by this descriptor.",
+    trad_rectangularity: "Ratio of maximum inscribed rectangle area to minimum enclosing rectangle area. Values closer to 1 indicate a more rectangular fruit outline.",
+    image_ocr_dbnet_base64: "Diagnostic OCR preview showing DBNet text boxes, candidate reads, confidences, and selected Line when OCR is requested. It helps diagnose Line detection errors.",
+    image_pre_calibration_base64: "Image before color calibration, with ColorChecker overlay when available. It is the first visual check for checker detection and scale calibration.",
+    image_raw_base64: "Raw model-output preview retained for diagnosis. It shows the original predicted masks before cleanup is used for measurement.",
+    image_cleanup_hybrid_base64: "Cleanup preview showing processed masks, raw mask outlines, axes, midline, and ColorChecker overlay. These cleaned masks feed the main measurements.",
+    image_sm_base64: "Smoothed preview showing fitted fruit and flesh curves plus smoothed endpoint angle geometry. It helps verify the function-fit measurements.",
+    image_traditional_base64: "Traditional preview showing Tomato Analyzer-style overlays such as axes, widths, angles, circle, ellipse, and indentation areas. It helps audit the traditional descriptors.",
+    line: "Short Line ID detected from text in the image, optionally constrained by the Possible Lines list. It may contain letters, numbers, dashes, or underscores.",
+    line_confidence: "Confidence score for the selected Line read or matched Line option. Lower values should be checked manually.",
+    line_orientation: "Image rotation inferred from the selected OCR read and used for mask generation when text is detected. A value of 0 means no rotation was applied.",
+    processing_ms: "Total backend processing time for the image in milliseconds. Timeout rows are shown as greater than the configured timeout value."
+};
+
 function collectColumns(group, parentId = null) {
     const direct = (group.columns || []).map(column => ({ ...column, groupId: group.id || parentId }));
     const nested = (group.children || []).flatMap(child => collectColumns(child, group.id || parentId));
@@ -583,6 +697,7 @@ function handleColumnDrop(event) {
     clearColumnDragState();
     if (didReorder) {
         renderColumnPicker();
+        renderColumnHelp();
         syncVisibleOutputs();
     }
 }
@@ -630,6 +745,14 @@ function columnDigits(column, item) {
     return typeof column.digits === "function" ? column.digits(item) : (column.digits ?? 1);
 }
 
+function columnHelpText(column) {
+    return COLUMN_HELP_TEXT[column.id] || "This column is part of the selected fruit analysis output.";
+}
+
+function columnHelpIcon(column) {
+    return `<span class="column-help-icon" title="${escapeHtml(columnHelpText(column))}" aria-label="${escapeHtml(columnHelpText(column))}">?</span>`;
+}
+
 function renderColumnPicker() {
     const menu = document.getElementById("column-menu");
     if (!menu) return;
@@ -650,6 +773,7 @@ function renderColumnPicker() {
                         <span class="column-drag-handle" aria-hidden="true">::</span>
                         <input type="checkbox" class="column-checkbox" data-column-id="${column.id}">
                         <span>${escapeHtml(column.label)}</span>
+                        ${columnHelpIcon(column)}
                     </label>
                     `).join("")}
                 </div>` : ""}
@@ -660,6 +784,34 @@ function renderColumnPicker() {
     menu.innerHTML = COLUMN_GROUPS.map(group => renderGroup(group)).join("");
 
     updateColumnPickerChecks();
+}
+
+function renderColumnHelp() {
+    const root = document.getElementById("column-help");
+    if (!root) return;
+
+    const renderEntries = (columns = []) => orderedColumns(columns).map(column => `
+        <details class="help-entry">
+            <summary>${escapeHtml(column.label)}</summary>
+            <p>${escapeHtml(COLUMN_HELP_TEXT[column.id] || "This column is part of the selected fruit analysis output.")}</p>
+        </details>
+    `).join("");
+
+    const renderGroup = (group, depth = 0) => {
+        const groupText = GROUP_HELP_TEXT[group.id] || "";
+        return `
+            <details class="help-group help-depth-${depth}" open>
+                <summary>${escapeHtml(group.label)}</summary>
+                ${groupText ? `<p class="help-group-text">${escapeHtml(groupText)}</p>` : ""}
+                <div class="help-children">
+                    ${(group.children || []).map(child => renderGroup(child, depth + 1)).join("")}
+                    ${group.columns && group.columns.length ? renderEntries(group.columns) : ""}
+                </div>
+            </details>
+        `;
+    };
+
+    root.innerHTML = COLUMN_GROUPS.map(group => renderGroup(group)).join("");
 }
 
 function updateColumnPickerChecks() {
@@ -754,6 +906,7 @@ function syncVisibleOutputs() {
 
 function setupColumnControls() {
     renderColumnPicker();
+    renderColumnHelp();
 
     const button = document.getElementById("column-menu-button");
     const panel = document.getElementById("column-menu-panel");
@@ -769,6 +922,13 @@ function setupColumnControls() {
             }
         });
     }
+
+    document.getElementById("column-menu")?.addEventListener("click", (event) => {
+        if (event.target.closest(".column-help-icon")) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    });
 
     document.getElementById("column-menu")?.addEventListener("change", (event) => {
         const target = event.target;
@@ -883,6 +1043,11 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
     const file = document.getElementById("single-file").files[0];
     const status = document.getElementById("single-status");
     const resultDiv = document.getElementById("single-result");
+
+    if (!requireFruitSelection(status)) {
+        resultDiv.innerHTML = "";
+        return;
+    }
 
     status.innerText = "Processing...";
     resultDiv.innerHTML = "";
@@ -1004,8 +1169,10 @@ function isAnalysisSettingsLocked() {
 function updateAnalysisSettingsLock() {
     const card = document.getElementById("analysis-settings-card");
     const fieldset = document.getElementById("analysis-settings-fieldset");
+    const fruitSelect = document.getElementById("fruit-select");
     const locked = isAnalysisSettingsLocked();
     if (fieldset) fieldset.disabled = locked;
+    if (fruitSelect) fruitSelect.disabled = locked;
     if (card) card.classList.toggle("settings-locked", locked);
 }
 
@@ -1180,7 +1347,14 @@ function renderTableHeader() {
         <tr>
             <th>Include</th>
             <th>Filename</th>
-            ${visibleColumns().map(column => `<th class="draggable-column-header" draggable="true" data-column-id="${column.id}">${escapeHtml(column.label)}</th>`).join("")}
+            ${visibleColumns().map(column => `
+                <th class="draggable-column-header" draggable="true" data-column-id="${column.id}">
+                    <span class="column-title-wrap">
+                        <span>${escapeHtml(column.label)}</span>
+                        ${columnHelpIcon(column)}
+                    </span>
+                </th>
+            `).join("")}
         </tr>
     `;
 }
@@ -1385,6 +1559,8 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const files = document.getElementById("bulk-files").files;
     if (!files || files.length === 0) return;
+    const status = document.getElementById("bulk-status");
+    if (!requireFruitSelection(status)) return;
 
     stopActiveBatch("replaced");
 
