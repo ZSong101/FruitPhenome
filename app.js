@@ -272,7 +272,11 @@ function setupAnalysisSettingsControls() {
         input.addEventListener("input", updateSettingsSliderLabels);
     });
     ["read-labels-input", "use-color-checker-input"].forEach(id => {
-        document.getElementById(id)?.addEventListener("change", () => applyAnalysisColumnPreset());
+        document.getElementById(id)?.addEventListener("change", () => {
+            const allFeatures = document.getElementById("mode-all-features-input");
+            if (allFeatures) allFeatures.checked = false;
+            applyAnalysisColumnPreset();
+        });
     });
     ["scale-value-input", "scale-unit-select"].forEach(id => {
         document.getElementById(id)?.addEventListener("input", () => {
@@ -288,9 +292,17 @@ function setupAnalysisSettingsControls() {
             syncVisibleOutputs();
         });
     });
-    ["mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(id => {
-        document.getElementById(id)?.addEventListener("change", (event) => {
-            if (event.target.checked) setExclusiveOutputMode(id);
+    ["mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input", "mode-all-features-input"].forEach(id => {
+        document.getElementById(id)?.addEventListener("change", () => {
+            if (id === "mode-all-features-input" && checkboxChecked(id, false)) {
+                ["read-labels-input", "use-color-checker-input", "mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(otherId => {
+                    const input = document.getElementById(otherId);
+                    if (input) input.checked = true;
+                });
+            } else if (id !== "mode-all-features-input") {
+                const allFeatures = document.getElementById("mode-all-features-input");
+                if (allFeatures) allFeatures.checked = false;
+            }
             applyAnalysisColumnPreset();
         });
     });
@@ -730,20 +742,6 @@ function addColumnIds(target, ids) {
     });
 }
 
-function selectedOutputMode() {
-    if (checkboxChecked("mode-visual-comparison-input", false)) return "visual";
-    if (checkboxChecked("mode-legacy-ta-input", false)) return "legacy";
-    if (checkboxChecked("mode-smoothing-input", true)) return "smoothing";
-    return "minimal";
-}
-
-function setExclusiveOutputMode(activeId) {
-    ["mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(id => {
-        const input = document.getElementById(id);
-        if (input && id !== activeId) input.checked = false;
-    });
-}
-
 function applyMetricColumnUnitLabels(settings = null) {
     const useCm = settingsUseMetricUnits(settings || getAnalysisSettingsSnapshot());
     ALL_COLUMNS.forEach(column => {
@@ -754,6 +752,32 @@ function applyMetricColumnUnitLabels(settings = null) {
     });
 }
 
+function removeColumnIds(target, ids) {
+    ids.forEach(id => target.delete(id));
+}
+
+function hasVisibleColumnInGroup(groupId) {
+    return columnIdsForGroup(groupId).some(id => visibleColumnIds.has(id));
+}
+
+function updateDependentSettingsAvailability() {
+    const locked = isAnalysisSettingsLocked();
+    const lineEnabled = checkboxChecked("read-labels-input", false);
+    const traditionalEnabled = checkboxChecked("mode-legacy-ta-input", false) || hasVisibleColumnInGroup("traditional");
+
+    const lineBlock = document.getElementById("line-settings-block");
+    const lineInput = document.getElementById("line-options-input");
+    if (lineBlock) lineBlock.classList.toggle("disabled", !lineEnabled);
+    if (lineInput) lineInput.disabled = locked || !lineEnabled;
+
+    const tradBlock = document.getElementById("traditional-settings-block");
+    if (tradBlock) tradBlock.classList.toggle("disabled", !traditionalEnabled);
+    ["trad-proximal-width-input", "trad-distal-width-input", "trad-angle-span-input", "trad-end-band-input"].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) input.disabled = locked || !traditionalEnabled;
+    });
+}
+
 function applyAnalysisColumnPreset({ sync = true } = {}) {
     const settings = getAnalysisSettingsSnapshot();
     applyMetricColumnUnitLabels(settings);
@@ -761,25 +785,41 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
     const nextVisible = new Set();
     addColumnIds(nextVisible, ALWAYS_DEFAULT_COLUMN_IDS);
 
-    if (settings.readLabels) {
+    if (checkboxChecked("mode-all-features-input", false)) {
+        addColumnIds(nextVisible, ALL_COLUMN_IDS);
+    } else {
+        if (settings.useColorChecker) {
+            addColumnIds(nextVisible, columnIdsForGroup("experimental_color"));
+        }
+        if (settings.readLabels) {
+            addColumnIds(nextVisible, OCR_COLUMN_IDS);
+        }
+        if (checkboxChecked("mode-smoothing-input", true)) {
+            addColumnIds(nextVisible, columnIdsForGroup("experimental_smoothed"));
+        }
+        if (checkboxChecked("mode-legacy-ta-input", false)) {
+            addColumnIds(nextVisible, columnIdsForGroup("traditional"));
+        }
+        if (checkboxChecked("mode-visual-comparison-input", false)) {
+            addColumnIds(nextVisible, columnIdsForGroup("previews_standard"));
+        }
+    }
+
+    if (!settings.useColorChecker && !checkboxChecked("mode-all-features-input", false)) {
+        removeColumnIds(nextVisible, columnIdsForGroup("experimental_color"));
+    }
+
+    if (!settings.readLabels && !checkboxChecked("mode-all-features-input", false)) {
+        removeColumnIds(nextVisible, OCR_COLUMN_IDS);
+    }
+
+    if (settings.readLabels && checkboxChecked("mode-visual-comparison-input", false)) {
         addColumnIds(nextVisible, OCR_COLUMN_IDS);
-    }
-
-    const mode = selectedOutputMode();
-    if (settings.useColorChecker && !["legacy", "visual"].includes(mode)) {
-        addColumnIds(nextVisible, columnIdsForGroup("experimental_color"));
-    }
-
-    if (mode === "visual") {
-        addColumnIds(nextVisible, columnIdsForGroup("previews_standard"));
-    } else if (mode === "legacy") {
-        addColumnIds(nextVisible, columnIdsForGroup("traditional"));
-    } else if (mode === "smoothing") {
-        addColumnIds(nextVisible, columnIdsForGroup("experimental_smoothed"));
     }
 
     visibleColumnIds = nextVisible;
     updateColumnPickerChecks();
+    updateDependentSettingsAvailability();
     if (sync) syncVisibleOutputs();
 }
 
@@ -866,6 +906,7 @@ function handleColumnDragEnd() {
 
 function setupColumnDragAndDrop() {
     const containers = [
+        document.getElementById("main-column-menu"),
         document.getElementById("column-menu"),
         document.getElementById("single-column-menu"),
         document.querySelector("#bulk-table thead")
@@ -914,6 +955,7 @@ function columnHelpIcon(column) {
 function renderColumnPicker() {
     applyMetricColumnUnitLabels();
     const menus = [
+        document.getElementById("main-column-menu"),
         document.getElementById("column-menu"),
         document.getElementById("single-column-menu")
     ].filter(Boolean);
@@ -1155,6 +1197,7 @@ function setupColumnControls() {
     renderColumnHelp();
 
     [
+        ["main-column-menu-button", "main-column-menu-panel"],
         ["column-menu-button", "column-menu-panel"],
         ["single-column-menu-button", "single-column-menu-panel"]
     ].forEach(([buttonId, panelId]) => {
@@ -1193,11 +1236,14 @@ function setupColumnControls() {
             else visibleColumnIds.delete(target.dataset.columnId);
         }
 
+        const allFeatures = document.getElementById("mode-all-features-input");
+        if (allFeatures) allFeatures.checked = false;
         updateColumnPickerChecks();
+        updateDependentSettingsAvailability();
         syncVisibleOutputs();
     };
 
-    ["column-menu", "single-column-menu"].forEach(menuId => {
+    ["main-column-menu", "column-menu", "single-column-menu"].forEach(menuId => {
         const menu = document.getElementById(menuId);
         menu?.addEventListener("click", handleMenuClick);
         menu?.addEventListener("change", handleMenuChange);
@@ -1205,9 +1251,6 @@ function setupColumnControls() {
 
     setupColumnDragAndDrop();
 }
-
-setupColumnControls();
-setupAnalysisSettingsControls();
 
 function renderSingleMetricCard(title, columns, item) {
     applyMetricColumnUnitLabels();
@@ -1356,6 +1399,9 @@ let batchRunCounter = 0;
 const BATCH_PAUSE_MS = 500;
 const BATCH_WARMUP_COUNT = 2;
 
+setupColumnControls();
+setupAnalysisSettingsControls();
+
 function formatDuration(ms) {
     const elapsedSec = Math.floor(ms / 1000);
     const h = String(Math.floor(elapsedSec / 3600)).padStart(2, '0');
@@ -1436,6 +1482,7 @@ function updateAnalysisSettingsLock() {
     if (fieldset) fieldset.disabled = locked;
     if (fruitSelect) fruitSelect.disabled = locked;
     if (card) card.classList.toggle("settings-locked", locked);
+    updateDependentSettingsAvailability();
 }
 
 function stopActiveBatch(reason = "stopped") {

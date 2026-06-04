@@ -60,10 +60,10 @@
     .column-drop-target { outline: 2px solid #1170ff; outline-offset: -2px; background: #eaf2ff !important; }
     .bulk-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
     .column-dropdown { position: relative; display: inline-flex; align-items: center; }
-    .bulk-toolbar button, .single-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
-    #column-menu-button, #single-column-menu-button { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding-right: 28px; position: relative; }
-    #column-menu-button::after, #single-column-menu-button::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #4a5963; }
-    #column-menu-button:hover, #single-column-menu-button:hover { background: #e1e6eb; }
+    .bulk-toolbar button, .single-toolbar button, .settings-column-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
+    #column-menu-button, #single-column-menu-button, #main-column-menu-button { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding-right: 28px; position: relative; }
+    #column-menu-button::after, #single-column-menu-button::after, #main-column-menu-button::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #4a5963; }
+    #column-menu-button:hover, #single-column-menu-button:hover, #main-column-menu-button:hover { background: #e1e6eb; }
     .column-menu-panel { display: none; position: absolute; z-index: 50; top: calc(100% + 6px); left: 0; width: min(520px, calc(100vw - 64px)); max-height: 520px; overflow: auto; background: white; border: 1px solid #ccd8df; border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.18); padding: 10px; text-align: left; }
     .column-menu-panel.open { display: block; }
     .column-group { border: 1px solid #e0e6eb; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
@@ -79,14 +79,17 @@
     .column-help-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 17px; height: 17px; border-radius: 50%; background: #dceeff; color: #23608f; border: 1px solid #a8cce8; font-size: 12px; font-weight: 800; line-height: 1; cursor: help; text-decoration: none; }
     .column-option .column-help-icon { margin-left: auto; }
     .setting-label { display: inline-flex !important; align-items: center; gap: 6px; width: fit-content; }
-    .settings-checks { display: grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 10px 16px; margin-bottom: 16px; }
-    .settings-check { display: flex !important; align-items: flex-start; gap: 8px; margin: 0 !important; font-weight: 700; line-height: 1.35; }
-    .settings-check input { width: auto; margin-top: 2px; flex: 0 0 auto; }
+    .settings-checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-bottom: 16px; }
+    .settings-check { display: flex !important; align-items: flex-start; gap: 8px; margin: 0 !important; padding: 9px 10px; border: 1px solid #d8e1e8; border-radius: 6px; background: #f8fafb; font-weight: 700; line-height: 1.35; min-width: 0; }
+    .settings-check > span { min-width: 0; }
+    .settings-panel .settings-check input[type="checkbox"] { width: 16px; height: 16px; min-width: 16px; padding: 0; margin: 2px 0 0; flex: 0 0 16px; }
     .rich-help { position: relative; overflow: visible; }
     .help-popover { display: none; position: absolute; z-index: 80; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 48px)); padding: 10px 12px; border: 1px solid #a8cce8; border-radius: 7px; background: #f4faff; color: #1f3545; box-shadow: 0 10px 28px rgba(0,0,0,0.18); font-size: 13px; font-weight: 500; line-height: 1.4; text-align: left; }
     .rich-help:hover .help-popover, .rich-help:focus .help-popover, .rich-help:focus-within .help-popover { display: block; }
     .help-popover a { color: #135f9a; font-weight: 700; }
-    .single-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 4px; }
+    .single-toolbar, .settings-column-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 16px; }
+    .dependent-settings.disabled { opacity: 0.48; }
+    .dependent-settings.disabled input, .dependent-settings.disabled textarea, .dependent-settings.disabled select { cursor: not-allowed; }
     .processing-log-cell { min-width: 180px; max-width: 320px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; text-align: left; line-height: 1.35; }
     .processing-log-cell.error-log { color: #c7362f; font-weight: 700; }
     .processing-log-cell .muted { white-space: nowrap; }
@@ -194,7 +197,7 @@
             <input type="checkbox" id="mode-smoothing-input" checked>
             <span>Smoothing
               <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Use the smoothed function-fit measurements as the default output set. This turns on smoothed features and turns off cleanup and Legacy (TA) features.</span>
+                <span class="help-popover">Select smoothed function-fit measurements. This adds the smoothed feature columns without changing the other feature selectors.</span>
               </span>
             </span>
           </label>
@@ -202,7 +205,7 @@
             <input type="checkbox" id="mode-legacy-ta-input">
             <span>Legacy Features (TA)
               <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Use the Tomato Analyzer-derived Legacy Features (TA) as the default output set. This turns on TA features and turns off experimental cleanup and smoothing features.</span>
+                <span class="help-popover">Select Tomato Analyzer-derived Legacy Features (TA). This adds the TA feature columns without changing the other feature selectors.</span>
               </span>
             </span>
           </label>
@@ -210,20 +213,38 @@
             <input type="checkbox" id="mode-visual-comparison-input">
             <span>Visual Comparison
               <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Use diagnostic preview images as the default output set. This turns on previews and turns off experimental and Legacy (TA) numeric feature columns.</span>
+                <span class="help-popover">Select diagnostic preview images for visual comparison. This adds the preview columns without changing the other feature selectors.</span>
+              </span>
+            </span>
+          </label>
+          <label class="settings-check" for="mode-all-features-input">
+            <input type="checkbox" id="mode-all-features-input">
+            <span>All Features
+              <span class="column-help-icon rich-help" tabindex="0">?
+                <span class="help-popover">Select every available output column, including experimental features, Legacy Features (TA), run information, and previews. You can still fine-tune the exact columns below.</span>
               </span>
             </span>
           </label>
         </div>
+        <div class="settings-column-toolbar">
+          <div class="column-dropdown">
+            <button type="button" id="main-column-menu-button" aria-expanded="false">Columns</button>
+            <div id="main-column-menu-panel" class="column-menu-panel">
+              <div id="main-column-menu"></div>
+            </div>
+          </div>
+        </div>
         <div class="settings-grid">
           <div>
-            <label for="line-options-input" class="setting-label">Possible Lines
-              <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Optional comma-separated list of expected Line IDs. When on-screen label reading is enabled, OCR output is matched against this list so the app chooses the closest listed Line rather than a free-form read; handwritten digit recognition may still need manual review.</span>
-              </span>
-            </label>
-            <textarea id="line-options-input" placeholder="Example: 12-4, 12-5, 13-1. Optional."></textarea>
-            <p class="muted">Separate possible Line IDs with commas. Text recognition will search for a match within this list.</p>
+            <div id="line-settings-block" class="dependent-settings">
+              <label for="line-options-input" class="setting-label">Possible Lines
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Optional comma-separated list of expected Line IDs. When on-screen label reading is enabled, OCR output is matched against this list so the app chooses the closest listed Line rather than a free-form read; handwritten digit recognition may still need manual review.</span>
+                </span>
+              </label>
+              <textarea id="line-options-input" placeholder="Example: 12-4, 12-5, 13-1. Optional."></textarea>
+              <p class="muted">Separate possible Line IDs with commas. Text recognition will search for a match within this list.</p>
+            </div>
 
             <div class="scale-row">
               <div>
@@ -241,7 +262,7 @@
             <p class="muted">If blank, the ColorChecker must be detected for metric outputs.</p>
           </div>
 
-          <div>
+          <div id="traditional-settings-block" class="dependent-settings">
             <h3 style="margin-top: 0;">Traditional Feature Settings (TA)</h3>
             <div class="slider-row">
               <label for="trad-proximal-width-input" class="setting-label">Proximal width <span class="column-help-icon" title="User-defined position, as a percent of fruit height from the proximal end, used for proximal width, triangle, and proximal blockiness measurements.">?</span></label>
