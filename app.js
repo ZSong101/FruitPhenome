@@ -179,7 +179,7 @@ function requireFruitSelection(statusEl) {
     }
 
     if (statusEl) {
-        statusEl.innerText = "Select Fruit is required. Choose Watermelon on the Main tab before processing.";
+        statusEl.innerText = "Select Fruit is required. Choose fruit type on the Main tab before processing.";
     }
     fruitSelect?.classList.add("input-error");
     fruitStatus?.classList.add("visible");
@@ -594,7 +594,7 @@ const COLUMN_HELP_TEXT = {
     line: "Short Line ID detected from text in the image, optionally constrained by the Possible Lines list. It may contain letters, numbers, dashes, or underscores.",
     line_confidence: "Confidence score for the selected Line read or matched Line option. Lower values should be checked manually.",
     line_orientation: "Image rotation inferred from the selected OCR read and used for mask generation when text is detected. A value of 0 means no rotation was applied.",
-    processing_ms: "Total backend processing time for the image in milliseconds. Timeout rows are shown as greater than the configured timeout value."
+    processing_ms: "Total backend processing time for the image in milliseconds. Trying at less busy times of the day can change average processing time up to 2x. Timeout rows are shown as greater than the configured timeout value."
 };
 
 function collectColumns(group, parentId = null) {
@@ -832,6 +832,7 @@ function captureBatchScrollAnchor() {
     const table = document.getElementById("bulk-table");
     if (!table || table.style.display === "none") return { active: false };
 
+    const tableWrap = table.closest(".table-wrap");
     const doc = document.documentElement;
     const scrollHeight = Math.max(doc.scrollHeight, document.body.scrollHeight);
     const viewportBottom = window.scrollY + window.innerHeight;
@@ -839,29 +840,88 @@ function captureBatchScrollAnchor() {
     const tableTop = window.scrollY + tableRect.top;
     const tableBottom = window.scrollY + tableRect.bottom;
     const bottomOffset = scrollHeight - viewportBottom;
-    const nearPageBottom = bottomOffset < 180;
-    const aboveTable = window.scrollY < tableTop - 20;
-    const alreadyBelowTable = window.scrollY > tableBottom - 20;
+    const nearPageBottom = bottomOffset < 12;
+    const aboveTable = viewportBottom <= tableTop + 12;
+    const belowTable = window.scrollY >= tableBottom - 12;
+    const horizontal = tableWrap ? {
+        scrollLeft: tableWrap.scrollLeft,
+        rightOffset: Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth - tableWrap.scrollLeft),
+        atRight: tableWrap.scrollWidth - tableWrap.clientWidth - tableWrap.scrollLeft < 4
+    } : null;
 
     if (nearPageBottom) {
         return {
             active: true,
             mode: "page-bottom",
-            bottomOffset: Math.max(0, bottomOffset)
+            bottomOffset: Math.max(0, bottomOffset),
+            horizontal
+        };
+    }
+
+    if (aboveTable) {
+        return {
+            active: true,
+            mode: "fixed",
+            scrollY: window.scrollY,
+            horizontal
+        };
+    }
+
+    if (belowTable) {
+        return {
+            active: true,
+            mode: "below-table",
+            scrollY: window.scrollY,
+            tableHeight: tableRect.height,
+            horizontal
+        };
+    }
+
+    const rows = Array.from(table.querySelectorAll("tbody tr[data-row-index]"));
+    const viewportCenter = window.innerHeight / 2;
+    const visibleRows = rows
+        .map(row => ({ row, rect: row.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.bottom >= 0 && rect.top <= window.innerHeight);
+
+    if (visibleRows.length > 0) {
+        visibleRows.sort((a, b) => (
+            Math.abs((a.rect.top + a.rect.height / 2) - viewportCenter)
+            - Math.abs((b.rect.top + b.rect.height / 2) - viewportCenter)
+        ));
+        const anchorRow = visibleRows[0];
+        return {
+            active: true,
+            mode: "row",
+            rowIndex: anchorRow.row.dataset.rowIndex,
+            rowViewportTop: anchorRow.rect.top,
+            fallbackTableOffset: window.scrollY - tableTop,
+            horizontal
         };
     }
 
     return {
-        active: aboveTable || nearPageBottom || alreadyBelowTable,
-        mode: aboveTable ? "fixed" : "bottom",
+        active: true,
+        mode: "table-offset",
+        tableOffset: window.scrollY - tableTop,
         scrollY: window.scrollY,
-        scrollHeight
+        horizontal
     };
 }
 
 function restoreBatchScrollAnchor(anchor) {
     if (!anchor?.active) return;
     const apply = () => {
+        const table = document.getElementById("bulk-table");
+        const tableWrap = table?.closest(".table-wrap");
+        if (tableWrap && anchor.horizontal) {
+            if (anchor.horizontal.atRight) {
+                const maxScrollLeft = Math.max(0, tableWrap.scrollWidth - tableWrap.clientWidth);
+                tableWrap.scrollLeft = Math.max(0, maxScrollLeft - anchor.horizontal.rightOffset);
+            } else {
+                tableWrap.scrollLeft = anchor.horizontal.scrollLeft || 0;
+            }
+        }
+
         if (anchor.mode === "page-bottom") {
             const doc = document.documentElement;
             const nextScrollHeight = Math.max(doc.scrollHeight, document.body.scrollHeight);
@@ -872,11 +932,28 @@ function restoreBatchScrollAnchor(anchor) {
             window.scrollTo({ top: anchor.scrollY, behavior: "auto" });
             return;
         }
-        const doc = document.documentElement;
-        const nextScrollHeight = Math.max(doc.scrollHeight, document.body.scrollHeight);
-        const heightDelta = nextScrollHeight - anchor.scrollHeight;
-        if (heightDelta !== 0) {
-            window.scrollTo({ top: Math.max(0, anchor.scrollY + heightDelta), behavior: "auto" });
+        if (anchor.mode === "below-table") {
+            if (!table) return;
+            const nextHeight = table.getBoundingClientRect().height;
+            window.scrollTo({ top: Math.max(0, anchor.scrollY + nextHeight - (anchor.tableHeight || 0)), behavior: "auto" });
+            return;
+        }
+        if (anchor.mode === "row") {
+            const row = table?.querySelector(`tbody tr[data-row-index="${anchor.rowIndex}"]`);
+            if (row) {
+                const nextTop = row.getBoundingClientRect().top;
+                window.scrollTo({ top: Math.max(0, window.scrollY + nextTop - anchor.rowViewportTop), behavior: "auto" });
+                return;
+            }
+            if (table) {
+                const tableTop = window.scrollY + table.getBoundingClientRect().top;
+                window.scrollTo({ top: Math.max(0, tableTop + (anchor.fallbackTableOffset || 0)), behavior: "auto" });
+            }
+            return;
+        }
+        if (anchor.mode === "table-offset" && table) {
+            const tableTop = window.scrollY + table.getBoundingClientRect().top;
+            window.scrollTo({ top: Math.max(0, tableTop + (anchor.tableOffset || 0)), behavior: "auto" });
         }
     };
     requestAnimationFrame(() => {
@@ -1392,6 +1469,7 @@ function renderBulkTable() {
 
     globalBatchResults.forEach((item, idx) => {
         const tr = document.createElement("tr");
+        tr.dataset.rowIndex = String(idx);
         if (item.success) {
             if (!item.included) tr.classList.add("excluded-row");
             tr.innerHTML = `
