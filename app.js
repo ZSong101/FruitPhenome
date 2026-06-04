@@ -107,10 +107,27 @@ function hasLineOptionList(settings) {
     return Boolean(settings?.lineOptions && settings.lineOptions.trim());
 }
 
+function checkboxChecked(id, fallback = false) {
+    const el = document.getElementById(id);
+    return el ? Boolean(el.checked) : fallback;
+}
+
+function positiveNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function settingsUseMetricUnits(settings = null) {
+    const snapshot = settings || getAnalysisSettingsSnapshot();
+    return Boolean(snapshot.useColorChecker || positiveNumber(snapshot.scaleValue));
+}
+
 function shouldRequestLineOcr(previewIds = [], settings = null) {
+    const snapshot = settings || getAnalysisSettingsSnapshot();
+    if (!snapshot.readLabels) return false;
     return previewIds.includes("image_line_ocr_base64")
         || previewIds.includes("image_ocr_dbnet_base64")
-        || hasLineOptionList(settings || getAnalysisSettingsSnapshot())
+        || hasLineOptionList(snapshot)
         || (typeof visibleColumnIds !== "undefined" && (
             visibleColumnIds.has("line")
             || visibleColumnIds.has("line_confidence")
@@ -147,6 +164,7 @@ function measurementUnit(data) {
  
 function areaUnit(data) {
     if (data.area_unit === "cm2") return "cm²";
+    if (data.area_unit === "px2") return "px²";
     return "cm²";
 }
 
@@ -211,6 +229,8 @@ function requireFruitSelection(statusEl) {
 function getAnalysisSettingsSnapshot() {
     return {
         fruit: selectedFruit(),
+        readLabels: checkboxChecked("read-labels-input", false),
+        useColorChecker: checkboxChecked("use-color-checker-input", true),
         lineOptions: document.getElementById("line-options-input")?.value || "",
         scaleValue: (document.getElementById("scale-value-input")?.value || "").trim(),
         scaleUnit: document.getElementById("scale-unit-select")?.value || "cm_per_px",
@@ -225,6 +245,8 @@ function getAnalysisSettingsSnapshot() {
 
 function appendAnalysisSettings(formData, settings) {
     const snapshot = settings || getAnalysisSettingsSnapshot();
+    formData.append("read_labels", snapshot.readLabels ? "true" : "false");
+    formData.append("use_color_checker", snapshot.useColorChecker ? "true" : "false");
     formData.append("line_options", snapshot.lineOptions || "");
     formData.append("scale_value", snapshot.scaleValue || "");
     formData.append("scale_unit", snapshot.scaleUnit || "cm_per_px");
@@ -248,6 +270,29 @@ function setupAnalysisSettingsControls() {
     updateSettingsSliderLabels();
     document.querySelectorAll("#analysis-settings-fieldset input[type='range']").forEach(input => {
         input.addEventListener("input", updateSettingsSliderLabels);
+    });
+    ["read-labels-input", "use-color-checker-input"].forEach(id => {
+        document.getElementById(id)?.addEventListener("change", () => applyAnalysisColumnPreset());
+    });
+    ["scale-value-input", "scale-unit-select"].forEach(id => {
+        document.getElementById(id)?.addEventListener("input", () => {
+            applyMetricColumnUnitLabels();
+            renderColumnPicker();
+            renderColumnHelp();
+            syncVisibleOutputs();
+        });
+        document.getElementById(id)?.addEventListener("change", () => {
+            applyMetricColumnUnitLabels();
+            renderColumnPicker();
+            renderColumnHelp();
+            syncVisibleOutputs();
+        });
+    });
+    ["mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(id => {
+        document.getElementById(id)?.addEventListener("change", (event) => {
+            if (event.target.checked) setExclusiveOutputMode(id);
+            applyAnalysisColumnPreset();
+        });
     });
     document.getElementById("fruit-select")?.addEventListener("change", (event) => {
         const invalid = event.target.value !== "watermelon";
@@ -366,11 +411,32 @@ function metricColumn(id, label, field, digits = 3, options = {}) {
     };
 }
 
+function pixelUnitLabel(label) {
+    return String(label)
+        .replaceAll("cm²", "px²")
+        .replaceAll("cm2", "px²")
+        .replaceAll("cm", "px");
+}
+
 function cmMetricColumn(id, label, field, digits = (item) => item.digits, options = {}) {
-    return metricColumn(id, label, field, digits, {
+    const histLabel = options.histLabel || label;
+    const csvLabel = options.csvLabel || label;
+    const column = metricColumn(id, label, field, digits, {
         ...options,
-        get: (data, item) => item.isCm ? valueOrNull(data[field]) : null
+        histLabel,
+        csvLabel,
+        get: (data, item) => (item.isCm || item.allowPixelMetrics || measurementUnit(data) === "px")
+            ? valueOrNull(data[field])
+            : null
     });
+    column.unitSensitive = true;
+    column.cmLabel = label;
+    column.pxLabel = options.pxLabel || pixelUnitLabel(label);
+    column.cmHistLabel = histLabel;
+    column.pxHistLabel = options.pxHistLabel || pixelUnitLabel(histLabel);
+    column.cmCsvLabel = csvLabel;
+    column.pxCsvLabel = options.pxCsvLabel || pixelUnitLabel(csvLabel);
+    return column;
 }
 
 function previewColumn(id, label, field) {
@@ -650,6 +716,73 @@ let draggedColumnId = null;
 let latestSingleData = null;
 let latestSinglePreviewIds = [];
 
+const ALWAYS_DEFAULT_COLUMN_IDS = ["processing_ms"];
+const OCR_COLUMN_IDS = ["line", "line_confidence", "line_orientation"];
+
+function columnIdsForGroup(groupId) {
+    const group = COLUMN_GROUP_MAP.get(groupId);
+    return group ? columnsForGroup(group).map(column => column.id) : [];
+}
+
+function addColumnIds(target, ids) {
+    ids.forEach(id => {
+        if (COLUMN_BY_ID.has(id)) target.add(id);
+    });
+}
+
+function selectedOutputMode() {
+    if (checkboxChecked("mode-visual-comparison-input", false)) return "visual";
+    if (checkboxChecked("mode-legacy-ta-input", false)) return "legacy";
+    if (checkboxChecked("mode-smoothing-input", true)) return "smoothing";
+    return "minimal";
+}
+
+function setExclusiveOutputMode(activeId) {
+    ["mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(id => {
+        const input = document.getElementById(id);
+        if (input && id !== activeId) input.checked = false;
+    });
+}
+
+function applyMetricColumnUnitLabels(settings = null) {
+    const useCm = settingsUseMetricUnits(settings || getAnalysisSettingsSnapshot());
+    ALL_COLUMNS.forEach(column => {
+        if (!column.unitSensitive) return;
+        column.label = useCm ? column.cmLabel : column.pxLabel;
+        column.histLabel = useCm ? column.cmHistLabel : column.pxHistLabel;
+        column.csvLabel = useCm ? column.cmCsvLabel : column.pxCsvLabel;
+    });
+}
+
+function applyAnalysisColumnPreset({ sync = true } = {}) {
+    const settings = getAnalysisSettingsSnapshot();
+    applyMetricColumnUnitLabels(settings);
+
+    const nextVisible = new Set();
+    addColumnIds(nextVisible, ALWAYS_DEFAULT_COLUMN_IDS);
+
+    if (settings.readLabels) {
+        addColumnIds(nextVisible, OCR_COLUMN_IDS);
+    }
+
+    const mode = selectedOutputMode();
+    if (settings.useColorChecker && !["legacy", "visual"].includes(mode)) {
+        addColumnIds(nextVisible, columnIdsForGroup("experimental_color"));
+    }
+
+    if (mode === "visual") {
+        addColumnIds(nextVisible, columnIdsForGroup("previews_standard"));
+    } else if (mode === "legacy") {
+        addColumnIds(nextVisible, columnIdsForGroup("traditional"));
+    } else if (mode === "smoothing") {
+        addColumnIds(nextVisible, columnIdsForGroup("experimental_smoothed"));
+    }
+
+    visibleColumnIds = nextVisible;
+    updateColumnPickerChecks();
+    if (sync) syncVisibleOutputs();
+}
+
 function orderedColumns(columns) {
     const ids = new Set(columns.map(column => column.id));
     return columnOrderIds
@@ -734,6 +867,7 @@ function handleColumnDragEnd() {
 function setupColumnDragAndDrop() {
     const containers = [
         document.getElementById("column-menu"),
+        document.getElementById("single-column-menu"),
         document.querySelector("#bulk-table thead")
     ].filter(Boolean);
 
@@ -778,8 +912,12 @@ function columnHelpIcon(column) {
 }
 
 function renderColumnPicker() {
-    const menu = document.getElementById("column-menu");
-    if (!menu) return;
+    applyMetricColumnUnitLabels();
+    const menus = [
+        document.getElementById("column-menu"),
+        document.getElementById("single-column-menu")
+    ].filter(Boolean);
+    if (!menus.length) return;
 
     const renderGroup = (group, depth = 0) => `
         <details class="column-group column-depth-${depth}" open>
@@ -805,12 +943,16 @@ function renderColumnPicker() {
         </details>
     `;
 
-    menu.innerHTML = COLUMN_GROUPS.map(group => renderGroup(group)).join("");
+    const html = COLUMN_GROUPS.map(group => renderGroup(group)).join("");
+    menus.forEach(menu => {
+        menu.innerHTML = html;
+    });
 
     updateColumnPickerChecks();
 }
 
 function renderColumnHelp() {
+    applyMetricColumnUnitLabels();
     const root = document.getElementById("column-help");
     if (!root) return;
 
@@ -1002,17 +1144,23 @@ function refreshBatchOutputs(chartsContainer) {
 }
 
 function syncVisibleOutputs() {
+    applyMetricColumnUnitLabels();
     refreshBatchOutputs(document.getElementById("histograms-container"));
     renderCurrentSingleAnalysis();
 }
 
 function setupColumnControls() {
+    applyAnalysisColumnPreset({ sync: false });
     renderColumnPicker();
     renderColumnHelp();
 
-    const button = document.getElementById("column-menu-button");
-    const panel = document.getElementById("column-menu-panel");
-    if (button && panel) {
+    [
+        ["column-menu-button", "column-menu-panel"],
+        ["single-column-menu-button", "single-column-menu-panel"]
+    ].forEach(([buttonId, panelId]) => {
+        const button = document.getElementById(buttonId);
+        const panel = document.getElementById(panelId);
+        if (!button || !panel) return;
         button.addEventListener("click", () => {
             panel.classList.toggle("open");
             button.setAttribute("aria-expanded", panel.classList.contains("open") ? "true" : "false");
@@ -1023,16 +1171,16 @@ function setupColumnControls() {
                 button.setAttribute("aria-expanded", "false");
             }
         });
-    }
+    });
 
-    document.getElementById("column-menu")?.addEventListener("click", (event) => {
+    const handleMenuClick = (event) => {
         if (event.target.closest(".column-help-icon")) {
             event.preventDefault();
             event.stopPropagation();
         }
-    });
+    };
 
-    document.getElementById("column-menu")?.addEventListener("change", (event) => {
+    const handleMenuChange = (event) => {
         const target = event.target;
         if (target.classList.contains("column-group-checkbox")) {
             const group = COLUMN_GROUP_MAP.get(target.dataset.groupId);
@@ -1047,6 +1195,12 @@ function setupColumnControls() {
 
         updateColumnPickerChecks();
         syncVisibleOutputs();
+    };
+
+    ["column-menu", "single-column-menu"].forEach(menuId => {
+        const menu = document.getElementById(menuId);
+        menu?.addEventListener("click", handleMenuClick);
+        menu?.addEventListener("change", handleMenuChange);
     });
 
     setupColumnDragAndDrop();
@@ -1056,7 +1210,8 @@ setupColumnControls();
 setupAnalysisSettingsControls();
 
 function renderSingleMetricCard(title, columns, item) {
-    const metricColumns = columns.filter(column => !column.html);
+    applyMetricColumnUnitLabels();
+    const metricColumns = columns.filter(column => !column.html && visibleColumnIds.has(column.id));
     if (metricColumns.length === 0) return "";
 
     return `
@@ -1349,7 +1504,7 @@ function batchResultItem(file, data) {
     const isCm = measurementUnit(data) === "cm";
     const digits = isCm ? 1 : 0;
     const notes = rowNotes(data);
-    return { file_name: file.name, data, included: true, isCm, digits, notes, success: true };
+    return { file_name: file.name, data, included: true, isCm, allowPixelMetrics: true, digits, notes, success: true };
 }
 
 function setBatchResultItem(item, replaceIndex = null) {
@@ -1454,6 +1609,7 @@ function warningBadge(notes) {
 }
 
 function renderTableHeader() {
+    applyMetricColumnUnitLabels();
     const table = document.getElementById("bulk-table");
     const thead = table.querySelector("thead");
     thead.innerHTML = `
@@ -1734,6 +1890,7 @@ document.querySelector("#bulk-table tbody").addEventListener("change", (e) => {
 
 // --- DYNAMIC HISTOGRAM BUILDER ---
 function rebuildHistograms(container) {
+    applyMetricColumnUnitLabels();
     container.innerHTML = ""; // Clear old charts
     if (globalBatchResults.length === 0) return;
 
@@ -1891,6 +2048,7 @@ function csvEscape(value) {
 }
 
 document.getElementById("download-csv-btn").addEventListener("click", () => {
+    applyMetricColumnUnitLabels();
     const columns = visibleColumns().filter(column => column.csv !== false);
     const header = ["Filename", "Processing Log", ...columns.map(column => column.csvLabel || column.label)];
     const rows = [header.map(csvEscape).join(",")];
