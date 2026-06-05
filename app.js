@@ -2356,27 +2356,36 @@ function renderBulkTable() {
 
 function updateBatchJumpControls() {
     const controls = document.getElementById("batch-jump-controls");
-    const table = document.getElementById("bulk-table");
-    if (!controls || !table) return;
-    controls.classList.toggle("visible", table.style.display !== "none" && globalBatchResults.length > 0);
+    if (!controls) return;
+    const shouldShow = globalBatchResults.length > 0 || Boolean(activeBatch?.running || activeBatch?.onDemandRunning);
+    controls.classList.toggle("visible", shouldShow);
+
+    const topBtn = document.getElementById("batch-jump-top");
+    const bottomBtn = document.getElementById("batch-jump-bottom");
+    const doc = document.documentElement;
+    const maxScroll = Math.max(0, Math.max(doc.scrollHeight, document.body.scrollHeight) - window.innerHeight);
+    if (topBtn) topBtn.disabled = window.scrollY <= 2;
+    if (bottomBtn) bottomBtn.disabled = window.scrollY >= maxScroll - 2;
 }
 
-function scrollToBulkTableTop() {
-    const table = document.getElementById("bulk-table");
-    if (!table) return;
-    const top = window.scrollY + table.getBoundingClientRect().top - 12;
-    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+function scrollToPageTop() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function scrollToBulkTableBottom() {
-    const table = document.getElementById("bulk-table");
-    if (!table) return;
-    const bottom = window.scrollY + table.getBoundingClientRect().bottom - window.innerHeight + 24;
-    window.scrollTo({ top: Math.max(0, bottom), behavior: "smooth" });
+function scrollToPageBottom() {
+    const doc = document.documentElement;
+    const maxScroll = Math.max(0, Math.max(doc.scrollHeight, document.body.scrollHeight) - window.innerHeight);
+    window.scrollTo({ top: maxScroll, behavior: "smooth" });
 }
 
-window.addEventListener("scroll", scheduleVirtualTableRender, { passive: true });
-window.addEventListener("resize", scheduleVirtualTableRender, { passive: true });
+window.addEventListener("scroll", () => {
+    scheduleVirtualTableRender();
+    updateBatchJumpControls();
+}, { passive: true });
+window.addEventListener("resize", () => {
+    scheduleVirtualTableRender();
+    updateBatchJumpControls();
+}, { passive: true });
 
 async function warmUpBatch(batch, status) {
     if (batch.warmupComplete || batch.nextIndex !== 0 || batch.files.length === 0) return;
@@ -2547,8 +2556,8 @@ document.getElementById("resume-batch-btn").addEventListener("click", async () =
     await runBatch(activeBatch);
 });
 
-document.getElementById("batch-jump-top")?.addEventListener("click", scrollToBulkTableTop);
-document.getElementById("batch-jump-bottom")?.addEventListener("click", scrollToBulkTableBottom);
+document.getElementById("batch-jump-top")?.addEventListener("click", scrollToPageTop);
+document.getElementById("batch-jump-bottom")?.addEventListener("click", scrollToPageBottom);
 
 // --- ROW TOGGLE LISTENER ---
 // Listen to the table body. If a checkbox is clicked, update state and instantly rebuild histograms.

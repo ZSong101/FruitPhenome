@@ -62,10 +62,11 @@
     .mini-histogram { width: 92px; height: 34px; display: block; margin: 0 auto; }
     .mini-histogram-empty { color: #88939c; font-size: 12px; }
     .virtual-spacer-row td { pointer-events: none; }
-    .batch-jump-controls { display: none; position: fixed; right: 18px; bottom: 18px; z-index: 120; gap: 8px; align-items: center; }
+    .batch-jump-controls { display: none; position: fixed; right: 18px; bottom: 18px; z-index: 1200; gap: 8px; align-items: center; }
     .batch-jump-controls.visible { display: inline-flex; }
-    .batch-jump-controls button { border: 1px solid #b9c3cc; border-radius: 999px; background: #eef3f7; color: #1f343f; font-weight: 700; padding: 8px 12px; box-shadow: 0 6px 18px rgba(30, 44, 55, 0.16); cursor: pointer; }
-    .batch-jump-controls button:hover { background: #dfe9f0; }
+    .batch-jump-controls button { width: 38px; height: 38px; border: 1px solid rgba(116, 130, 140, 0.55); border-radius: 999px; background: rgba(238, 243, 247, 0.72); color: #1f343f; font-size: 19px; font-weight: 800; line-height: 1; box-shadow: 0 6px 18px rgba(30, 44, 55, 0.13); cursor: pointer; backdrop-filter: blur(4px); }
+    .batch-jump-controls button:hover:not(:disabled) { background: rgba(223, 233, 240, 0.88); }
+    .batch-jump-controls button:disabled { opacity: 0.32; cursor: default; box-shadow: none; }
     .column-title-wrap { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
     .column-dragging { opacity: 0.45; }
     .column-drop-target { outline: 2px solid #1170ff; outline-offset: -2px; background: #eaf2ff !important; }
@@ -361,15 +362,16 @@
       </div>
       
       <div id="histograms-container" class="charts-container"></div>
-      <div id="batch-jump-controls" class="batch-jump-controls" aria-label="Batch navigation">
-        <button type="button" id="batch-jump-top">Top</button>
-        <button type="button" id="batch-jump-bottom">Bottom</button>
-      </div>
     </section>
     </div>
 
     <footer id="last-updated-stamp" class="app-footer">Last updated: loading...</footer>
   </main>
+
+  <div id="batch-jump-controls" class="batch-jump-controls" aria-label="Page navigation">
+    <button type="button" id="batch-jump-top" aria-label="Scroll to top" title="Scroll to top">↑</button>
+    <button type="button" id="batch-jump-bottom" aria-label="Scroll to bottom" title="Scroll to bottom">↓</button>
+  </div>
 
   <div id="lightbox" class="lightbox-overlay">
     <span class="lightbox-close" id="lightbox-close">&times;</span>
