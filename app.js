@@ -155,15 +155,16 @@ function settingsUseMetricUnits(settings = null) {
 
 function shouldRequestLineOcr(previewIds = [], settings = null) {
     const snapshot = settings || getAnalysisSettingsSnapshot();
-    if (!snapshot.readLabels) return false;
-    return previewIds.includes("image_line_ocr_base64")
+    const explicitOcrOutputRequested = previewIds.includes("image_line_ocr_base64")
         || previewIds.includes("image_ocr_dbnet_base64")
-        || hasLineOptionList(snapshot)
         || (typeof visibleColumnIds !== "undefined" && (
             visibleColumnIds.has("line")
             || visibleColumnIds.has("line_confidence")
             || visibleColumnIds.has("line_orientation")
         ));
+    if (explicitOcrOutputRequested) return true;
+    if (!snapshot.readLabels) return false;
+    return hasLineOptionList(snapshot);
 }
 
 function processUrl(previewIds = [], includeLineOcr = false) {
@@ -645,7 +646,7 @@ const COLUMN_GROUPS = [
         label: "Run Info",
         columns: [
             metricColumn("line", "Line", "line", 0, { histogram: false }),
-            metricColumn("line_confidence", "Line Confidence", "line_confidence", 2, { histogram: false }),
+            metricColumn("line_confidence", "Line Confidence", "line_confidence", 2),
             metricColumn("line_orientation", "Orientation", "line_orientation", 0, { histogram: false, get: (data) => valueOrNull(data.line_orientation) }),
             metricColumn("processing_ms", "Time (ms)", "processing_ms", 0, {
                 histogramOverflow: BULK_REQUEST_TIMEOUT_MS,
@@ -1537,6 +1538,8 @@ function makeBatchState(files, settings, requestLineOcr) {
         onDemandStartedAt: null,
         onDemandTotal: 0,
         onDemandCompleted: 0,
+        onDemandAbortController: null,
+        onDemandStopRequested: false,
         abortController: null,
         running: false,
         finished: false,
@@ -1628,9 +1631,10 @@ function updateBatchControls(batch) {
     if (!stopBtn || !resumeBtn || !downloadBtn) return;
 
     const ownsUi = isActiveBatch(batch);
-    stopBtn.style.display = ownsUi && batch.running ? "inline-flex" : "none";
-    resumeBtn.style.display = ownsUi && !batch.running && !batch.finished && batch.nextIndex < batch.files.length ? "inline-flex" : "none";
-    downloadBtn.style.display = ownsUi && !batch.running && batch.successCount > 0 ? "inline-flex" : "none";
+    const busy = Boolean(batch.running || batch.onDemandRunning);
+    stopBtn.style.display = ownsUi && busy ? "inline-flex" : "none";
+    resumeBtn.style.display = ownsUi && !busy && !batch.finished && batch.nextIndex < batch.files.length ? "inline-flex" : "none";
+    downloadBtn.style.display = ownsUi && !busy && batch.successCount > 0 ? "inline-flex" : "none";
     updateAnalysisSettingsLock();
 }
 
@@ -1650,12 +1654,20 @@ function updateAnalysisSettingsLock() {
 }
 
 function stopActiveBatch(reason = "stopped") {
-    if (!activeBatch || !activeBatch.running) return;
+    if (!activeBatch || (!activeBatch.running && !activeBatch.onDemandRunning)) return;
     const batch = activeBatch;
-    batch.stopRequested = true;
-    batch.stopReason = reason;
+    if (batch.running) {
+        batch.stopRequested = true;
+        batch.stopReason = reason;
+    }
+    if (batch.onDemandRunning) {
+        batch.onDemandStopRequested = true;
+    }
     if (batch.abortController) {
         batch.abortController.abort();
+    }
+    if (batch.onDemandAbortController) {
+        batch.onDemandAbortController.abort();
     }
     if (reason === "replaced") {
         if (batch.timerInterval) {
@@ -1664,6 +1676,9 @@ function stopActiveBatch(reason = "stopped") {
         }
         batch.elapsedMs = batchElapsedMs(batch);
         batch.running = false;
+        batch.onDemandRunning = false;
+        batch.onDemandStartedAt = null;
+        batch.onDemandAbortController = null;
         updateAnalysisSettingsLock();
         return;
     }
@@ -1849,10 +1864,11 @@ function missingColumnsForItem(item, batch, columnIds) {
     return columnIds.filter(id => itemNeedsColumn(item, id, batch));
 }
 
-async function postBatchStage(rowIds, requestedColumnIds, batch) {
+async function postBatchStage(rowIds, requestedColumnIds, batch, signal = null) {
     const response = await fetch(batchStageUrl(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({
             password: currentPassword,
             username: currentUsername,
@@ -1882,9 +1898,10 @@ function fileForBatchItem(batch, item) {
     return batch.files.find(file => file.name === item.file_name || file.name === item.data?.filename) || null;
 }
 
-async function fallbackReprocessChunk(chunk, requestedIds, batch) {
+async function fallbackReprocessChunk(chunk, requestedIds, batch, signal = null) {
     const previewIds = requestedIds.filter(isPreviewColumnId);
     for (const { item } of chunk) {
+        if (signal?.aborted) throw new Error("Batch stopped");
         const file = fileForBatchItem(batch, item);
         if (!file) {
             throw new Error("Cached source unavailable and original file could not be matched.");
@@ -1896,7 +1913,7 @@ async function fallbackReprocessChunk(chunk, requestedIds, batch) {
             previewIds,
             BULK_REQUEST_TIMEOUT_MS,
             0,
-            null,
+            signal,
             batch.settings,
             runLineOcr,
             item.data?.row_id,
@@ -1974,7 +1991,10 @@ async function runMissingStageRequest() {
     if (entries.length === 0) return;
 
     missingStageInFlight = true;
+    batch.onDemandStopRequested = false;
+    batch.onDemandAbortController = new AbortController();
     startOnDemandBatchTimer(batch, entries.length);
+    updateBatchControls(batch);
     entries.forEach(({ item, missing }) => {
         item.pendingColumnIds = new Set([...(item.pendingColumnIds || []), ...missing]);
         item.pendingStages = new Set([...(item.pendingStages || []), ...missing.map(stageForColumnId).filter(Boolean)]);
@@ -1984,13 +2004,14 @@ async function runMissingStageRequest() {
     try {
         const chunkSize = 4;
         for (let i = 0; i < entries.length; i += chunkSize) {
+            if (!isActiveBatch(batch) || batch.onDemandStopRequested || batch.onDemandAbortController?.signal.aborted) break;
             const chunk = entries.slice(i, i + chunkSize);
             try {
                 if (stagedEndpointUnavailable) {
-                    await fallbackReprocessChunk(chunk, requestedIds, batch);
+                    await fallbackReprocessChunk(chunk, requestedIds, batch, batch.onDemandAbortController.signal);
                 } else {
                     const rowIds = chunk.map(entry => entry.item.data.row_id);
-                    const response = await postBatchStage(rowIds, requestedIds, batch);
+                    const response = await postBatchStage(rowIds, requestedIds, batch, batch.onDemandAbortController.signal);
                     (response.rows || []).forEach(mergeStagePatch);
                 }
                 chunk.forEach(({ item }) => {
@@ -1999,10 +2020,18 @@ async function runMissingStageRequest() {
                     markUnavailableMissingColumns(item, requestedIds);
                 });
             } catch (err) {
+                const stopped = batch.onDemandStopRequested || err.name === "AbortError" || err.message === "Batch stopped";
+                if (stopped) {
+                    chunk.forEach(({ item }) => {
+                        item.pendingColumnIds = new Set();
+                        item.pendingStages = new Set();
+                    });
+                    break;
+                }
                 if (err.status === 404 && !stagedEndpointUnavailable) {
                     stagedEndpointUnavailable = true;
                     try {
-                        await fallbackReprocessChunk(chunk, requestedIds, batch);
+                        await fallbackReprocessChunk(chunk, requestedIds, batch, batch.onDemandAbortController.signal);
                         chunk.forEach(({ item }) => {
                             item.pendingColumnIds = new Set();
                             item.pendingStages = new Set();
@@ -2041,8 +2070,10 @@ async function runMissingStageRequest() {
         }
     } finally {
         finishOnDemandBatchTimer(batch);
+        batch.onDemandAbortController = null;
         missingStageInFlight = false;
         refreshBatchOutputs(document.getElementById("histograms-container"));
+        updateBatchControls(batch);
         if (missingStageQueued) {
             missingStageQueued = false;
             scheduleMissingStageRequest();
@@ -2584,6 +2615,7 @@ function csvEscape(value) {
 }
 
 document.getElementById("download-csv-btn").addEventListener("click", () => {
+    if (activeBatch?.running || activeBatch?.onDemandRunning) return;
     applyMetricColumnUnitLabels();
     const columns = visibleColumns().filter(column => column.csv !== false);
     const header = ["Filename", "Processing Log", ...columns.map(column => column.csvLabel || column.label)];
