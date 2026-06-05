@@ -495,7 +495,8 @@ function previewColumn(id, label, field) {
         get: () => null,
         html: (item) => {
             if (item.data?.[field]) {
-                return `<img src="data:image/jpeg;base64,${item.data[field]}" class="thumb preview-img">`;
+                const fullUrl = previewFetchUrl(item.data, field, "full");
+                return `<img src="data:image/jpeg;base64,${item.data[field]}" data-full-src="${escapeHtml(fullUrl || `data:image/jpeg;base64,${item.data[field]}`)}" class="thumb preview-img">`;
             }
             const thumbUrl = previewFetchUrl(item.data, field, "thumb");
             const fullUrl = previewFetchUrl(item.data, field, "full");
@@ -645,7 +646,7 @@ const COLUMN_GROUPS = [
         columns: [
             metricColumn("line", "Line", "line", 0, { histogram: false }),
             metricColumn("line_confidence", "Line Confidence", "line_confidence", 2, { histogram: false }),
-            metricColumn("line_orientation", "Orientation", "line_orientation", 0, { histogram: false, get: (data) => valueOrNull(data.line_orientation ?? 0) }),
+            metricColumn("line_orientation", "Orientation", "line_orientation", 0, { histogram: false, get: (data) => valueOrNull(data.line_orientation) }),
             metricColumn("processing_ms", "Time (ms)", "processing_ms", 0, {
                 histogramOverflow: BULK_REQUEST_TIMEOUT_MS,
                 display: (value, item) => item.data?.processing_ms_timeout ? `>${BULK_REQUEST_TIMEOUT_MS}` : (isNumber(value) ? fmt(value, 0) : "N/A"),
@@ -1007,6 +1008,19 @@ function itemHasPendingColumn(item, columnId) {
         item?.pendingColumnIds instanceof Set && item.pendingColumnIds.has(columnId)
         || (stage && item?.pendingStages instanceof Set && item.pendingStages.has(stage))
     );
+}
+
+function columnHasUsableValue(item, columnId) {
+    if (isPreviewColumnId(columnId)) {
+        return Boolean(item?.data?.[columnId] || item?.data?.preview_refs?.[columnId]?.available);
+    }
+    if (columnId === "processing_ms") {
+        return item?.data?.processing_ms !== null && item?.data?.processing_ms !== undefined;
+    }
+    const column = COLUMN_BY_ID.get(columnId);
+    if (!column) return true;
+    const value = columnValue(column, item);
+    return !(value === null || value === undefined || value === "");
 }
 
 function previewFetchUrl(data, previewType, size = "thumb") {
@@ -1381,7 +1395,7 @@ function renderSinglePreviewCards(data, previewIds) {
             <div class="result-card single-preview-card">
                 <h3>${escapeHtml(column.label)}</h3>
                 ${imageData
-                    ? `<img src="data:image/jpeg;base64,${imageData}" class="preview-img single-preview-img">`
+                    ? `<img src="data:image/jpeg;base64,${imageData}" data-full-src="${escapeHtml(fullUrl || `data:image/jpeg;base64,${imageData}`)}" class="preview-img single-preview-img">`
                     : thumbUrl
                         ? `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" class="preview-img single-preview-img">`
                         : `<span class="muted">Preview unavailable</span>`}
@@ -1754,6 +1768,7 @@ function addBatchFailure(batch, file, err, replaceIndex = null) {
 let missingStageTimer = null;
 let missingStageInFlight = false;
 let missingStageQueued = false;
+let stagedEndpointUnavailable = false;
 
 function isPreviewColumnId(id) {
     return PREVIEW_STAGE_COLUMN_IDS.has(id);
@@ -1769,12 +1784,8 @@ function itemNeedsColumn(item, columnId, batch) {
     const stage = stageForColumnId(columnId);
     if (!stage || !stageAllowedBySettings(stage, batch?.settings || getAnalysisSettingsSnapshot())) return false;
 
-    if (isPreviewColumnId(columnId)) {
-        return !(item.data?.[columnId] || item.data?.preview_refs?.[columnId]?.available);
-    }
-
     if (columnId === "processing_ms") return false;
-    return !itemCompletedStages(item).has(stage);
+    return !columnHasUsableValue(item, columnId);
 }
 
 function missingColumnsForItem(item, batch, columnIds) {
@@ -1794,11 +1805,52 @@ async function postBatchStage(rowIds, requestedColumnIds, batch) {
             settings: batch.settings || getAnalysisSettingsSnapshot()
         })
     });
-    const data = await response.json().catch(() => ({}));
+    const text = await response.text();
+    const data = text ? (() => {
+        try { return JSON.parse(text); }
+        catch { return { message: text.slice(0, 180) }; }
+    })() : {};
     if (!response.ok || data.success === false) {
-        throw new Error(data.message || `HTTP ${response.status}`);
+        const err = new Error(data.message || `HTTP ${response.status}`);
+        err.status = response.status;
+        throw err;
     }
     return data;
+}
+
+function fileForBatchItem(batch, item) {
+    const rowId = item?.data?.row_id;
+    const index = rowId ? batch.rowIds.indexOf(rowId) : -1;
+    if (index >= 0 && batch.files[index]) return batch.files[index];
+    return batch.files.find(file => file.name === item.file_name || file.name === item.data?.filename) || null;
+}
+
+async function fallbackReprocessChunk(chunk, requestedIds, batch) {
+    const previewIds = requestedIds.filter(isPreviewColumnId);
+    for (const { item } of chunk) {
+        const file = fileForBatchItem(batch, item);
+        if (!file) {
+            throw new Error("Cached source unavailable and original file could not be matched.");
+        }
+        const runLineOcr = shouldRequestLineOcr(previewIds, batch.settings)
+            || requestedIds.some(id => OCR_STAGE_COLUMN_IDS.has(id));
+        const data = await postImage(
+            file,
+            previewIds,
+            BULK_REQUEST_TIMEOUT_MS,
+            0,
+            null,
+            batch.settings,
+            runLineOcr,
+            item.data?.row_id,
+            requestedIds
+        );
+        mergeStagePatch({
+            ...data,
+            session_id: data.session_id || item.data?.session_id,
+            row_id: item.data?.row_id || data.row_id
+        });
+    }
 }
 
 function mergeStagePatch(rowPatch) {
@@ -1819,6 +1871,20 @@ function markUnavailableMissingColumns(item, requestedIds) {
     if (missing.length === 0) return;
     if (!(item.unavailableColumnIds instanceof Set)) item.unavailableColumnIds = new Set();
     missing.forEach(id => item.unavailableColumnIds.add(id));
+    const labels = missing
+        .map(id => COLUMN_BY_ID.get(id)?.label || id)
+        .slice(0, 4)
+        .join(", ");
+    const suffix = missing.length > 4 ? `, +${missing.length - 4} more` : "";
+    const warning = `Selected outputs unavailable: ${labels}${suffix}.`;
+    const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
+    if (!warnings.includes(warning)) {
+        item.data = {
+            ...(item.data || {}),
+            warnings: [...warnings, warning]
+        };
+        item.notes = rowNotes(item.data);
+    }
 }
 
 function scheduleMissingStageRequest() {
@@ -1853,25 +1919,54 @@ async function runMissingStageRequest() {
         for (let i = 0; i < entries.length; i += chunkSize) {
             const chunk = entries.slice(i, i + chunkSize);
             try {
-                const rowIds = chunk.map(entry => entry.item.data.row_id);
-                const response = await postBatchStage(rowIds, requestedIds, batch);
-                (response.rows || []).forEach(mergeStagePatch);
+                if (stagedEndpointUnavailable) {
+                    await fallbackReprocessChunk(chunk, requestedIds, batch);
+                } else {
+                    const rowIds = chunk.map(entry => entry.item.data.row_id);
+                    const response = await postBatchStage(rowIds, requestedIds, batch);
+                    (response.rows || []).forEach(mergeStagePatch);
+                }
                 chunk.forEach(({ item }) => {
                     item.pendingColumnIds = new Set();
                     item.pendingStages = new Set();
                     markUnavailableMissingColumns(item, requestedIds);
                 });
             } catch (err) {
-                chunk.forEach(({ item }) => {
-                    item.pendingColumnIds = new Set();
-                    item.pendingStages = new Set();
-                    const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
-                    item.data = {
-                        ...(item.data || {}),
-                        warnings: [...warnings, `On-demand stage request failed: ${err.message}`]
-                    };
-                    item.notes = rowNotes(item.data);
-                });
+                if (err.status === 404 && !stagedEndpointUnavailable) {
+                    stagedEndpointUnavailable = true;
+                    try {
+                        await fallbackReprocessChunk(chunk, requestedIds, batch);
+                        chunk.forEach(({ item }) => {
+                            item.pendingColumnIds = new Set();
+                            item.pendingStages = new Set();
+                            markUnavailableMissingColumns(item, requestedIds);
+                        });
+                    } catch (fallbackErr) {
+                        chunk.forEach(({ item }) => {
+                            item.pendingColumnIds = new Set();
+                            item.pendingStages = new Set();
+                            markUnavailableMissingColumns(item, requestedIds);
+                            const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
+                            item.data = {
+                                ...(item.data || {}),
+                                warnings: [...warnings, `On-demand fallback failed: ${fallbackErr.message}`]
+                            };
+                            item.notes = rowNotes(item.data);
+                        });
+                    }
+                } else {
+                    chunk.forEach(({ item }) => {
+                        item.pendingColumnIds = new Set();
+                        item.pendingStages = new Set();
+                        markUnavailableMissingColumns(item, requestedIds);
+                        const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
+                        item.data = {
+                            ...(item.data || {}),
+                            warnings: [...warnings, `On-demand stage request failed: ${err.message}`]
+                        };
+                        item.notes = rowNotes(item.data);
+                    });
+                }
             }
             refreshBatchOutputs(document.getElementById("histograms-container"));
         }
@@ -1973,7 +2068,7 @@ function renderBulkTable() {
                 ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
             `;
         } else {
-            if (!item.included) tr.classList.add("excluded-row");
+            tr.classList.add("error-row");
             const includeCell = item.includeFailedMetrics
                 ? `<input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}">`
                 : "-";
@@ -1981,7 +2076,7 @@ function renderBulkTable() {
                 <td>${includeCell}</td>
                 <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
                 ${renderProcessingLogCell(item)}
-                ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}" style="color:${item.includeFailedMetrics ? "inherit" : "red"};">${renderCell(column, item)}</td>`).join("")}
+                ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
             `;
         }
         tbody.appendChild(tr);
