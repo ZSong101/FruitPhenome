@@ -324,10 +324,10 @@ function setupAnalysisSettingsControls() {
             syncVisibleOutputs();
         });
     });
-    ["mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input", "mode-all-features-input"].forEach(id => {
+    ["mode-standard-input", "mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input", "mode-all-features-input"].forEach(id => {
         document.getElementById(id)?.addEventListener("change", () => {
             if (id === "mode-all-features-input" && checkboxChecked(id, false)) {
-                ["read-labels-input", "use-color-checker-input", "mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(otherId => {
+                ["read-labels-input", "use-color-checker-input", "mode-standard-input", "mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(otherId => {
                     const input = document.getElementById(otherId);
                     if (input) input.checked = true;
                 });
@@ -846,6 +846,9 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
         }
         if (settings.readLabels) {
             addColumnIds(nextVisible, OCR_COLUMN_IDS);
+        }
+        if (checkboxChecked("mode-standard-input", true)) {
+            addColumnIds(nextVisible, columnIdsForGroup("experimental_raw"));
         }
         if (checkboxChecked("mode-smoothing-input", true)) {
             addColumnIds(nextVisible, columnIdsForGroup("experimental_smoothed"));
