@@ -2108,6 +2108,88 @@ function renderCell(column, item) {
     return escapeHtml(value);
 }
 
+function histogramPreviewValues(column) {
+    const values = [];
+    globalBatchResults.forEach(item => {
+        if (!item.included || (!item.success && !item.includeFailedMetrics)) return;
+        const value = columnValue(column, item);
+        if (isNumber(value)) values.push(value);
+    });
+    return values;
+}
+
+function miniHistogramSvg(column) {
+    if (column.histogram === false) return `<span class="muted">-</span>`;
+
+    const numericValues = histogramPreviewValues(column);
+    if (numericValues.length === 0) {
+        return `<span class="mini-histogram-empty">No data</span>`;
+    }
+
+    const overflowThreshold = column.histogramOverflow;
+    const overflowValues = overflowThreshold !== undefined ? numericValues.filter(v => v > overflowThreshold) : [];
+    const values = overflowThreshold !== undefined ? numericValues.filter(v => v <= overflowThreshold) : numericValues.slice();
+    const counts = [];
+
+    if (values.length > 0) {
+        values.sort((a, b) => a - b);
+        let min = values[0];
+        let max = values[values.length - 1];
+        if (max === min) {
+            min -= Math.max(Math.abs(min) * 0.05, 0.5);
+            max += Math.max(Math.abs(max) * 0.05, 0.5);
+        }
+        const binCount = Math.max(4, Math.min(10, Math.ceil(Math.sqrt(values.length))));
+        const binWidth = (max - min) / binCount || 1;
+        for (let i = 0; i < binCount; i++) counts.push(0);
+        values.forEach(value => {
+            let idx = Math.floor((value - min) / binWidth);
+            if (idx >= binCount) idx = binCount - 1;
+            if (idx < 0) idx = 0;
+            counts[idx]++;
+        });
+    }
+
+    if (overflowValues.length > 0) counts.push(overflowValues.length);
+    if (counts.length === 0) counts.push(0);
+
+    const width = 92;
+    const height = 34;
+    const pad = 3;
+    const gap = 1.5;
+    const maxCount = Math.max(...counts, 1);
+    const barW = Math.max(2, (width - pad * 2 - gap * (counts.length - 1)) / counts.length);
+    const bars = counts.map((count, idx) => {
+        const barH = count <= 0 ? 1 : Math.max(2, (height - pad * 2) * (count / maxCount));
+        const x = pad + idx * (barW + gap);
+        const y = height - pad - barH;
+        const fill = overflowThreshold !== undefined && overflowValues.length > 0 && idx === counts.length - 1
+            ? "#df7b39"
+            : "#4f9bd5";
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="1" fill="${fill}"></rect>`;
+    }).join("");
+
+    return `<svg class="mini-histogram" viewBox="0 0 ${width} ${height}" role="img" aria-label="Distribution preview for ${escapeHtml(column.histLabel || column.label)}">
+        <rect x="0" y="0" width="${width}" height="${height}" rx="4" fill="#eef6fb"></rect>
+        ${bars}
+    </svg>`;
+}
+
+function renderHistogramPreviewFooter(columns) {
+    const table = document.getElementById("bulk-table");
+    const tfoot = table.querySelector("tfoot");
+    if (!tfoot) return;
+
+    tfoot.innerHTML = `
+        <tr class="histogram-preview-row">
+            <td></td>
+            <td class="histogram-preview-label">Distribution previews, see proper histograms below.</td>
+            <td></td>
+            ${columns.map(column => `<td>${miniHistogramSvg(column)}</td>`).join("")}
+        </tr>
+    `;
+}
+
 function renderBulkTable() {
     const table = document.getElementById("bulk-table");
     const tbody = table.querySelector("tbody");
@@ -2151,6 +2233,7 @@ function renderBulkTable() {
         }
         tbody.appendChild(tr);
     });
+    renderHistogramPreviewFooter(columns);
 }
 
 async function warmUpBatch(batch, status) {
@@ -2336,6 +2419,7 @@ document.querySelector("#bulk-table tbody").addEventListener("change", (e) => {
         }
         
         // Dynamically update the charts
+        renderHistogramPreviewFooter(visibleColumns());
         rebuildHistograms(document.getElementById("histograms-container"));
     }
 });
