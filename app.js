@@ -813,9 +813,44 @@ function hasVisibleColumnInGroup(groupId) {
     return columnIdsForGroup(groupId).some(id => visibleColumnIds.has(id));
 }
 
+function columnSelectionState(ids) {
+    const validIds = ids.filter(id => COLUMN_BY_ID.has(id));
+    const selectedCount = validIds.filter(id => visibleColumnIds.has(id)).length;
+    return {
+        any: selectedCount > 0,
+        all: validIds.length > 0 && selectedCount === validIds.length,
+        partial: selectedCount > 0 && selectedCount < validIds.length
+    };
+}
+
+function setCheckboxVisualState(id, state) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.checked = Boolean(state.any);
+    input.indeterminate = Boolean(state.partial);
+}
+
+function setAllFeaturesVisualState() {
+    const input = document.getElementById("mode-all-features-input");
+    if (!input) return;
+    const state = columnSelectionState(ALL_COLUMN_IDS);
+    input.checked = Boolean(state.all);
+    input.indeterminate = Boolean(state.partial);
+}
+
+function syncAnalysisModeCheckboxesFromColumns() {
+    setCheckboxVisualState("mode-standard-input", columnSelectionState(columnIdsForGroup("experimental_raw")));
+    setCheckboxVisualState("mode-smoothing-input", columnSelectionState(columnIdsForGroup("experimental_smoothed")));
+    setCheckboxVisualState("mode-legacy-ta-input", columnSelectionState(columnIdsForGroup("traditional")));
+    setCheckboxVisualState("mode-visual-comparison-input", columnSelectionState(columnIdsForGroup("previews_standard")));
+    setCheckboxVisualState("read-labels-input", columnSelectionState([...OCR_STAGE_COLUMN_IDS]));
+    setCheckboxVisualState("use-color-checker-input", columnSelectionState([...COLOR_STAGE_COLUMN_IDS, "image_pre_calibration_base64"]));
+    setAllFeaturesVisualState();
+}
+
 function updateDependentSettingsAvailability() {
     const locked = isAnalysisSettingsLocked();
-    const lineEnabled = checkboxChecked("read-labels-input", false);
+    const lineEnabled = checkboxChecked("read-labels-input", false) || columnSelectionState([...OCR_STAGE_COLUMN_IDS]).any;
     const traditionalEnabled = checkboxChecked("mode-legacy-ta-input", false) || hasVisibleColumnInGroup("traditional");
 
     const lineBlock = document.getElementById("line-settings-block");
@@ -1141,6 +1176,7 @@ function updateColumnPickerChecks() {
         input.checked = columns.length > 0 && selectedCount === columns.length;
         input.indeterminate = selectedCount > 0 && selectedCount < columns.length;
     });
+    syncAnalysisModeCheckboxesFromColumns();
 }
 
 function captureBatchScrollAnchor() {
@@ -2859,26 +2895,74 @@ document.getElementById("download-csv-btn").addEventListener("click", () => {
 const lightbox = document.getElementById("lightbox");
 const lightboxImg = document.getElementById("lightbox-img");
 const lightboxClose = document.getElementById("lightbox-close");
+const lightboxStatus = document.getElementById("lightbox-status");
+
+function closeLightbox() {
+    lightbox.style.display = "none";
+    lightboxImg.onload = null;
+    lightboxImg.onerror = null;
+    lightboxImg.src = "";
+    lightboxImg.style.display = "none";
+    if (lightboxStatus) {
+        lightboxStatus.innerText = "";
+        lightboxStatus.style.display = "none";
+    }
+}
+
+function openLightbox(fullSrc, fallbackSrc = "") {
+    const primarySrc = fullSrc || fallbackSrc;
+    if (!primarySrc) return;
+
+    let attemptedFallback = false;
+    lightbox.style.display = "flex";
+    lightboxImg.style.display = "none";
+    lightboxImg.onload = null;
+    lightboxImg.onerror = null;
+    lightboxImg.src = "";
+    if (lightboxStatus) {
+        lightboxStatus.innerText = "Loading...";
+        lightboxStatus.style.display = "block";
+    }
+
+    lightboxImg.onload = () => {
+        if (lightboxStatus) {
+            lightboxStatus.innerText = "";
+            lightboxStatus.style.display = "none";
+        }
+        lightboxImg.style.display = "block";
+    };
+
+    lightboxImg.onerror = () => {
+        if (!attemptedFallback && fallbackSrc && fallbackSrc !== lightboxImg.src) {
+            attemptedFallback = true;
+            if (lightboxStatus) lightboxStatus.innerText = "Loading preview...";
+            lightboxImg.src = fallbackSrc;
+            return;
+        }
+        lightboxImg.style.display = "none";
+        if (lightboxStatus) {
+            lightboxStatus.innerText = "Preview failed to load.";
+            lightboxStatus.style.display = "block";
+        }
+    };
+
+    lightboxImg.src = primarySrc;
+}
 
 // Listen for clicks on ANY image with the 'preview-img' class
 document.body.addEventListener("click", (e) => {
     if (e.target && e.target.classList.contains("preview-img")) {
-        lightbox.style.display = "flex";
-        lightboxImg.src = e.target.dataset.fullSrc || e.target.src;
+        openLightbox(e.target.dataset.fullSrc || "", e.target.src || "");
     }
 });
 
 // Close when clicking the X
-lightboxClose.addEventListener("click", () => {
-    lightbox.style.display = "none";
-    lightboxImg.src = "";
-});
+lightboxClose.addEventListener("click", closeLightbox);
 
 // Close when clicking the dark background outside the image
 lightbox.addEventListener("click", (e) => {
     if (e.target === lightbox) {
-        lightbox.style.display = "none";
-        lightboxImg.src = "";
+        closeLightbox();
     }
 });
 
