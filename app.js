@@ -1534,6 +1534,7 @@ let histogramCharts = [];
 
 setupColumnControls();
 setupAnalysisSettingsControls();
+setupBatchJumpControls();
 
 function formatDuration(ms) {
     const elapsedSec = Math.floor(ms / 1000);
@@ -2354,18 +2355,86 @@ function renderBulkTable() {
     renderHistogramPreviewFooter(columns);
 }
 
+function setupBatchJumpControls() {
+    document.querySelectorAll("#batch-jump-controls").forEach(element => element.remove());
+
+    const controls = document.createElement("div");
+    controls.id = "batch-jump-controls";
+    controls.className = "batch-jump-controls";
+    controls.setAttribute("aria-label", "Page navigation");
+
+    const topBtn = document.createElement("button");
+    topBtn.type = "button";
+    topBtn.id = "batch-jump-top";
+    topBtn.textContent = "↑";
+    topBtn.setAttribute("aria-label", "Scroll to top");
+    topBtn.title = "Scroll to top";
+    topBtn.addEventListener("click", scrollToPageTop);
+
+    const bottomBtn = document.createElement("button");
+    bottomBtn.type = "button";
+    bottomBtn.id = "batch-jump-bottom";
+    bottomBtn.textContent = "↓";
+    bottomBtn.setAttribute("aria-label", "Scroll to bottom");
+    bottomBtn.title = "Scroll to bottom";
+    bottomBtn.addEventListener("click", scrollToPageBottom);
+
+    controls.append(topBtn, bottomBtn);
+    document.body.appendChild(controls);
+    updateBatchJumpControls();
+}
+
+function pinBatchJumpControls(controls) {
+    controls.style.position = "fixed";
+    controls.style.right = "18px";
+    controls.style.bottom = "18px";
+    controls.style.left = "auto";
+    controls.style.top = "auto";
+    controls.style.zIndex = "1200";
+    controls.style.gap = "8px";
+    controls.style.alignItems = "center";
+    controls.style.transform = "none";
+}
+
+function styleBatchJumpButton(button, disabled) {
+    if (!button) return;
+    button.textContent = button.id === "batch-jump-top" ? "↑" : "↓";
+    button.style.width = "38px";
+    button.style.height = "38px";
+    button.style.borderRadius = "999px";
+    button.style.border = "1px solid rgba(116, 130, 140, 0.55)";
+    button.style.background = "rgba(238, 243, 247, 0.72)";
+    button.style.color = "#1f343f";
+    button.style.fontSize = "19px";
+    button.style.fontWeight = "800";
+    button.style.lineHeight = "1";
+    button.style.boxShadow = disabled ? "none" : "0 6px 18px rgba(30, 44, 55, 0.13)";
+    button.style.cursor = disabled ? "default" : "pointer";
+    button.style.opacity = disabled ? "0.28" : "0.78";
+    button.style.backdropFilter = "blur(4px)";
+}
+
 function updateBatchJumpControls() {
-    const controls = document.getElementById("batch-jump-controls");
+    let controls = document.getElementById("batch-jump-controls");
     if (!controls) return;
+    if (controls.parentElement !== document.body) {
+        document.body.appendChild(controls);
+    }
+    pinBatchJumpControls(controls);
     const shouldShow = globalBatchResults.length > 0 || Boolean(activeBatch?.running || activeBatch?.onDemandRunning);
     controls.classList.toggle("visible", shouldShow);
+    controls.style.display = shouldShow ? "inline-flex" : "none";
 
     const topBtn = document.getElementById("batch-jump-top");
     const bottomBtn = document.getElementById("batch-jump-bottom");
     const doc = document.documentElement;
     const maxScroll = Math.max(0, Math.max(doc.scrollHeight, document.body.scrollHeight) - window.innerHeight);
-    if (topBtn) topBtn.disabled = window.scrollY <= 2;
-    if (bottomBtn) bottomBtn.disabled = window.scrollY >= maxScroll - 2;
+    const atTop = window.scrollY <= 2;
+    const atBottom = window.scrollY >= maxScroll - 2;
+    if (topBtn) topBtn.disabled = atTop;
+    if (bottomBtn) bottomBtn.disabled = atBottom;
+    styleBatchJumpButton(topBtn, atTop);
+    styleBatchJumpButton(bottomBtn, atBottom);
 }
 
 function scrollToPageTop() {
@@ -2555,9 +2624,6 @@ document.getElementById("resume-batch-btn").addEventListener("click", async () =
     if (!activeBatch || activeBatch.running || activeBatch.finished) return;
     await runBatch(activeBatch);
 });
-
-document.getElementById("batch-jump-top")?.addEventListener("click", scrollToPageTop);
-document.getElementById("batch-jump-bottom")?.addEventListener("click", scrollToPageBottom);
 
 // --- ROW TOGGLE LISTENER ---
 // Listen to the table body. If a checkbox is clicked, update state and instantly rebuild histograms.
