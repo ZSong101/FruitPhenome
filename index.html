@@ -61,6 +61,11 @@
     #bulk-table tfoot .histogram-preview-label { white-space: normal; min-width: 180px; max-width: 260px; color: #7890a3; font-weight: 600; line-height: 1.25; }
     .mini-histogram { width: 92px; height: 34px; display: block; margin: 0 auto; }
     .mini-histogram-empty { color: #88939c; font-size: 12px; }
+    .virtual-spacer-row td { pointer-events: none; }
+    .batch-jump-controls { display: none; position: fixed; right: 18px; bottom: 18px; z-index: 120; gap: 8px; align-items: center; }
+    .batch-jump-controls.visible { display: inline-flex; }
+    .batch-jump-controls button { border: 1px solid #b9c3cc; border-radius: 999px; background: #eef3f7; color: #1f343f; font-weight: 700; padding: 8px 12px; box-shadow: 0 6px 18px rgba(30, 44, 55, 0.16); cursor: pointer; }
+    .batch-jump-controls button:hover { background: #dfe9f0; }
     .column-title-wrap { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
     .column-dragging { opacity: 0.45; }
     .column-drop-target { outline: 2px solid #1170ff; outline-offset: -2px; background: #eaf2ff !important; }
@@ -356,6 +361,10 @@
       </div>
       
       <div id="histograms-container" class="charts-container"></div>
+      <div id="batch-jump-controls" class="batch-jump-controls" aria-label="Batch navigation">
+        <button type="button" id="batch-jump-top">Top</button>
+        <button type="button" id="batch-jump-bottom">Bottom</button>
+      </div>
     </section>
     </div>
 

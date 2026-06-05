@@ -1275,7 +1275,24 @@ function restoreBatchScrollAnchor(anchor) {
     });
 }
 
-function refreshBatchOutputs(chartsContainer) {
+function requestHistogramRebuild(container, options = {}) {
+    const target = container || document.getElementById("histograms-container");
+    const delay = options.debounce ? 350 : 0;
+    if (histogramDebounceTimer) {
+        clearTimeout(histogramDebounceTimer);
+        histogramDebounceTimer = null;
+    }
+    if (delay <= 0) {
+        rebuildHistograms(target);
+        return;
+    }
+    histogramDebounceTimer = setTimeout(() => {
+        histogramDebounceTimer = null;
+        rebuildHistograms(target);
+    }, delay);
+}
+
+function refreshBatchOutputs(chartsContainer, options = {}) {
     const anchor = captureBatchScrollAnchor();
     renderBulkTable();
     document.querySelectorAll("#bulk-table img.preview-img").forEach(img => {
@@ -1284,8 +1301,9 @@ function refreshBatchOutputs(chartsContainer) {
             img.addEventListener("error", () => restoreBatchScrollAnchor(anchor), { once: true });
         }
     });
-    rebuildHistograms(chartsContainer || document.getElementById("histograms-container"));
+    requestHistogramRebuild(chartsContainer || document.getElementById("histograms-container"), { debounce: Boolean(options.debounceHistograms) });
     restoreBatchScrollAnchor(anchor);
+    updateBatchJumpControls();
 }
 
 function syncVisibleOutputs() {
@@ -1504,8 +1522,15 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
 let globalBatchResults = []; // Stores all row data for dynamic toggling
 let activeBatch = null;
 let batchRunCounter = 0;
-const BATCH_PAUSE_MS = 500;
+const BATCH_PAUSE_MS = 50;
 const BATCH_WARMUP_COUNT = 2;
+const VIRTUAL_TABLE_THRESHOLD = 80;
+const VIRTUAL_TABLE_BUFFER_ROWS = 10;
+const VIRTUAL_TABLE_ROW_HEIGHT = 46;
+const VIRTUAL_TABLE_PREVIEW_ROW_HEIGHT = 186;
+let virtualTableRenderQueued = false;
+let histogramDebounceTimer = null;
+let histogramCharts = [];
 
 setupColumnControls();
 setupAnalysisSettingsControls();
@@ -1732,7 +1757,7 @@ function finishBatch(batch, mode) {
     }
 
     updateBatchControls(batch);
-    rebuildHistograms(chartsContainer);
+    requestHistogramRebuild(chartsContainer);
 }
 
 function batchResultItem(file, data) {
@@ -1999,25 +2024,26 @@ async function runMissingStageRequest() {
         item.pendingColumnIds = new Set([...(item.pendingColumnIds || []), ...missing]);
         item.pendingStages = new Set([...(item.pendingStages || []), ...missing.map(stageForColumnId).filter(Boolean)]);
     });
-    refreshBatchOutputs(document.getElementById("histograms-container"));
+    refreshBatchOutputs(document.getElementById("histograms-container"), { debounceHistograms: true });
 
     try {
         const chunkSize = 4;
         for (let i = 0; i < entries.length; i += chunkSize) {
             if (!isActiveBatch(batch) || batch.onDemandStopRequested || batch.onDemandAbortController?.signal.aborted) break;
             const chunk = entries.slice(i, i + chunkSize);
+            const chunkRequestedIds = Array.from(new Set(chunk.flatMap(entry => entry.missing)));
             try {
                 if (stagedEndpointUnavailable) {
-                    await fallbackReprocessChunk(chunk, requestedIds, batch, batch.onDemandAbortController.signal);
+                    await fallbackReprocessChunk(chunk, chunkRequestedIds, batch, batch.onDemandAbortController.signal);
                 } else {
                     const rowIds = chunk.map(entry => entry.item.data.row_id);
-                    const response = await postBatchStage(rowIds, requestedIds, batch, batch.onDemandAbortController.signal);
+                    const response = await postBatchStage(rowIds, chunkRequestedIds, batch, batch.onDemandAbortController.signal);
                     (response.rows || []).forEach(mergeStagePatch);
                 }
                 chunk.forEach(({ item }) => {
                     item.pendingColumnIds = new Set();
                     item.pendingStages = new Set();
-                    markUnavailableMissingColumns(item, requestedIds);
+                    markUnavailableMissingColumns(item, chunkRequestedIds);
                 });
             } catch (err) {
                 const stopped = batch.onDemandStopRequested || err.name === "AbortError" || err.message === "Batch stopped";
@@ -2031,17 +2057,17 @@ async function runMissingStageRequest() {
                 if (err.status === 404 && !stagedEndpointUnavailable) {
                     stagedEndpointUnavailable = true;
                     try {
-                        await fallbackReprocessChunk(chunk, requestedIds, batch, batch.onDemandAbortController.signal);
+                        await fallbackReprocessChunk(chunk, chunkRequestedIds, batch, batch.onDemandAbortController.signal);
                         chunk.forEach(({ item }) => {
                             item.pendingColumnIds = new Set();
                             item.pendingStages = new Set();
-                            markUnavailableMissingColumns(item, requestedIds);
+                            markUnavailableMissingColumns(item, chunkRequestedIds);
                         });
                     } catch (fallbackErr) {
                         chunk.forEach(({ item }) => {
                             item.pendingColumnIds = new Set();
                             item.pendingStages = new Set();
-                            markUnavailableMissingColumns(item, requestedIds);
+                            markUnavailableMissingColumns(item, chunkRequestedIds);
                             const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
                             item.data = {
                                 ...(item.data || {}),
@@ -2054,7 +2080,7 @@ async function runMissingStageRequest() {
                     chunk.forEach(({ item }) => {
                         item.pendingColumnIds = new Set();
                         item.pendingStages = new Set();
-                        markUnavailableMissingColumns(item, requestedIds);
+                        markUnavailableMissingColumns(item, chunkRequestedIds);
                         const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
                         item.data = {
                             ...(item.data || {}),
@@ -2066,7 +2092,7 @@ async function runMissingStageRequest() {
             }
             batch.onDemandCompleted = Math.min(batch.onDemandTotal, batch.onDemandCompleted + chunk.length);
             updateBatchTimer(batch);
-            refreshBatchOutputs(document.getElementById("histograms-container"));
+            refreshBatchOutputs(document.getElementById("histograms-container"), { debounceHistograms: true });
         }
     } finally {
         finishOnDemandBatchTimer(batch);
@@ -2221,51 +2247,136 @@ function renderHistogramPreviewFooter(columns) {
     `;
 }
 
+function virtualRowHeightEstimate(columns) {
+    return columns.some(column => column.id.startsWith("image_"))
+        ? VIRTUAL_TABLE_PREVIEW_ROW_HEIGHT
+        : VIRTUAL_TABLE_ROW_HEIGHT;
+}
+
+function virtualTableRange(table, columns) {
+    const total = globalBatchResults.length;
+    if (total <= VIRTUAL_TABLE_THRESHOLD || !table || table.style.display === "none") {
+        return { start: 0, end: total, top: 0, bottom: 0, rowHeight: virtualRowHeightEstimate(columns), virtualized: false };
+    }
+
+    const rowHeight = virtualRowHeightEstimate(columns);
+    const tableTop = window.scrollY + table.getBoundingClientRect().top;
+    const viewportTop = window.scrollY;
+    const viewportBottom = viewportTop + window.innerHeight;
+    const start = Math.max(0, Math.floor((viewportTop - tableTop) / rowHeight) - VIRTUAL_TABLE_BUFFER_ROWS);
+    const visibleCount = Math.ceil((viewportBottom - tableTop) / rowHeight) - start + VIRTUAL_TABLE_BUFFER_ROWS;
+    const end = Math.min(total, Math.max(start + 1, start + visibleCount));
+
+    return {
+        start,
+        end,
+        top: start * rowHeight,
+        bottom: Math.max(0, (total - end) * rowHeight),
+        rowHeight,
+        virtualized: true
+    };
+}
+
+function appendVirtualSpacer(tbody, height, colSpan) {
+    if (height <= 0) return;
+    const spacer = document.createElement("tr");
+    spacer.className = "virtual-spacer-row";
+    spacer.innerHTML = `<td colspan="${colSpan}" style="height:${Math.round(height)}px; padding:0; border:0; background:transparent;"></td>`;
+    tbody.appendChild(spacer);
+}
+
+function renderBulkRow(item, idx, columns) {
+    const tr = document.createElement("tr");
+    tr.dataset.rowIndex = String(idx);
+    const columnCells = columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("");
+
+    if (item.success) {
+        if (!item.included) tr.classList.add("excluded-row");
+        tr.innerHTML = `
+            <td><input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}"></td>
+            <td>${escapeHtml(item.data?.filename || item.file_name)}
+                ${warningBadge(item.notes)}
+            </td>
+            ${renderProcessingLogCell(item)}
+            ${columnCells}
+        `;
+    } else if (item.retrying) {
+        tr.classList.add("retry-row");
+        tr.innerHTML = `
+            <td>-</td>
+            <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
+            ${renderProcessingLogCell(item)}
+            ${columnCells}
+        `;
+    } else {
+        tr.classList.add("error-row");
+        const includeCell = item.includeFailedMetrics
+            ? `<input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}">`
+            : "-";
+        tr.innerHTML = `
+            <td>${includeCell}</td>
+            <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
+            ${renderProcessingLogCell(item)}
+            ${columnCells}
+        `;
+    }
+    return tr;
+}
+
+function scheduleVirtualTableRender() {
+    if (virtualTableRenderQueued) return;
+    virtualTableRenderQueued = true;
+    requestAnimationFrame(() => {
+        virtualTableRenderQueued = false;
+        const table = document.getElementById("bulk-table");
+        if (!table || table.style.display === "none" || globalBatchResults.length <= VIRTUAL_TABLE_THRESHOLD) return;
+        renderBulkTable();
+    });
+}
+
 function renderBulkTable() {
     const table = document.getElementById("bulk-table");
     const tbody = table.querySelector("tbody");
     const columns = visibleColumns();
+    const range = virtualTableRange(table, columns);
+    const colSpan = columns.length + 3;
 
     renderTableHeader();
     tbody.innerHTML = "";
+    appendVirtualSpacer(tbody, range.top, colSpan);
 
-    globalBatchResults.forEach((item, idx) => {
-        const tr = document.createElement("tr");
-        tr.dataset.rowIndex = String(idx);
-        if (item.success) {
-            if (!item.included) tr.classList.add("excluded-row");
-            tr.innerHTML = `
-                <td><input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}"></td>
-                <td>${escapeHtml(item.data?.filename || item.file_name)}
-                    ${warningBadge(item.notes)}
-                </td>
-                ${renderProcessingLogCell(item)}
-                ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
-            `;
-        } else if (item.retrying) {
-            tr.classList.add("retry-row");
-            tr.innerHTML = `
-                <td>-</td>
-                <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
-                ${renderProcessingLogCell(item)}
-                ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
-            `;
-        } else {
-            tr.classList.add("error-row");
-            const includeCell = item.includeFailedMetrics
-                ? `<input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}">`
-                : "-";
-            tr.innerHTML = `
-                <td>${includeCell}</td>
-                <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
-                ${renderProcessingLogCell(item)}
-                ${columns.map(column => `<td class="${escapeHtml(column.cellClass || "")}">${renderCell(column, item)}</td>`).join("")}
-            `;
-        }
-        tbody.appendChild(tr);
-    });
+    for (let idx = range.start; idx < range.end; idx++) {
+        tbody.appendChild(renderBulkRow(globalBatchResults[idx], idx, columns));
+    }
+
+    appendVirtualSpacer(tbody, range.bottom, colSpan);
+    table.classList.toggle("virtualized-table", range.virtualized);
     renderHistogramPreviewFooter(columns);
 }
+
+function updateBatchJumpControls() {
+    const controls = document.getElementById("batch-jump-controls");
+    const table = document.getElementById("bulk-table");
+    if (!controls || !table) return;
+    controls.classList.toggle("visible", table.style.display !== "none" && globalBatchResults.length > 0);
+}
+
+function scrollToBulkTableTop() {
+    const table = document.getElementById("bulk-table");
+    if (!table) return;
+    const top = window.scrollY + table.getBoundingClientRect().top - 12;
+    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+}
+
+function scrollToBulkTableBottom() {
+    const table = document.getElementById("bulk-table");
+    if (!table) return;
+    const bottom = window.scrollY + table.getBoundingClientRect().bottom - window.innerHeight + 24;
+    window.scrollTo({ top: Math.max(0, bottom), behavior: "smooth" });
+}
+
+window.addEventListener("scroll", scheduleVirtualTableRender, { passive: true });
+window.addEventListener("resize", scheduleVirtualTableRender, { passive: true });
 
 async function warmUpBatch(batch, status) {
     if (batch.warmupComplete || batch.nextIndex !== 0 || batch.files.length === 0) return;
@@ -2346,11 +2457,11 @@ async function runBatch(batch) {
             } else {
                 const retryIndex = addBatchRetrying(file);
                 status.innerText = `Image ${index + 1} of ${batch.files.length}: ${BULK_RETRY_MESSAGE}`;
-                refreshBatchOutputs(chartsContainer);
+                refreshBatchOutputs(chartsContainer, { debounceHistograms: true });
 
                 if (batch.stopRequested) {
                     removeBatchPlaceholder(retryIndex);
-                    refreshBatchOutputs(chartsContainer);
+                    refreshBatchOutputs(chartsContainer, { debounceHistograms: true });
                     break;
                 }
 
@@ -2361,7 +2472,7 @@ async function runBatch(batch) {
                     if (!isActiveBatch(batch)) return;
                     if (batch.stopRequested) {
                         removeBatchPlaceholder(retryIndex);
-                        refreshBatchOutputs(chartsContainer);
+                        refreshBatchOutputs(chartsContainer, { debounceHistograms: true });
                         break;
                     }
                     addBatchResult(batch, file, retryData, retryIndex);
@@ -2370,7 +2481,7 @@ async function runBatch(batch) {
                     if (!isActiveBatch(batch)) return;
                     if (batch.stopRequested || retryErr.message === "Batch stopped") {
                         removeBatchPlaceholder(retryIndex);
-                        refreshBatchOutputs(chartsContainer);
+                        refreshBatchOutputs(chartsContainer, { debounceHistograms: true });
                         break;
                     }
                     addBatchFailure(batch, file, retryErr, retryIndex);
@@ -2380,7 +2491,7 @@ async function runBatch(batch) {
 
         batch.completed++;
         batch.nextIndex = index + 1;
-        refreshBatchOutputs(chartsContainer);
+        refreshBatchOutputs(chartsContainer, { debounceHistograms: true });
 
         if (batch.nextIndex < batch.files.length) {
             await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
@@ -2423,6 +2534,7 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
 
     globalBatchResults = [];
     renderBulkTable();
+    updateBatchJumpControls();
     await runBatch(batch);
 });
 
@@ -2434,6 +2546,9 @@ document.getElementById("resume-batch-btn").addEventListener("click", async () =
     if (!activeBatch || activeBatch.running || activeBatch.finished) return;
     await runBatch(activeBatch);
 });
+
+document.getElementById("batch-jump-top")?.addEventListener("click", scrollToBulkTableTop);
+document.getElementById("batch-jump-bottom")?.addEventListener("click", scrollToBulkTableBottom);
 
 // --- ROW TOGGLE LISTENER ---
 // Listen to the table body. If a checkbox is clicked, update state and instantly rebuild histograms.
@@ -2451,13 +2566,21 @@ document.querySelector("#bulk-table tbody").addEventListener("change", (e) => {
         
         // Dynamically update the charts
         renderHistogramPreviewFooter(visibleColumns());
-        rebuildHistograms(document.getElementById("histograms-container"));
+        requestHistogramRebuild(document.getElementById("histograms-container"));
     }
 });
 
 // --- DYNAMIC HISTOGRAM BUILDER ---
+function destroyHistogramCharts() {
+    histogramCharts.forEach(chart => {
+        try { chart.destroy(); } catch (err) { console.warn("Could not destroy histogram chart", err); }
+    });
+    histogramCharts = [];
+}
+
 function rebuildHistograms(container) {
     applyMetricColumnUnitLabels();
+    destroyHistogramCharts();
     container.innerHTML = ""; // Clear old charts
     if (globalBatchResults.length === 0) return;
 
@@ -2592,7 +2715,7 @@ function drawHistograms(histogramSeries, container) {
 
         if (maxY !== null) chartOptions.scales.y.max = maxY;
 
-        new Chart(canvas, {
+        const chart = new Chart(canvas, {
             type: "bar",
             data: {
                 labels: labels,
@@ -2600,6 +2723,7 @@ function drawHistograms(histogramSeries, container) {
             },
             options: chartOptions
         });
+        histogramCharts.push(chart);
         chartCount++;
     }
 
