@@ -742,7 +742,7 @@ const COLUMN_HELP_TEXT = {
     line: "Short Line ID detected from text in the image, optionally constrained by the Possible Lines list. It may contain letters, numbers, dashes, or underscores.",
     line_confidence: "Confidence score for the selected Line read or matched Line option. Lower values should be checked manually.",
     line_orientation: "Image rotation inferred from the selected OCR read and used for mask generation when text is detected. A value of 0 means no rotation was applied.",
-    processing_ms: "Total backend processing time for the image in milliseconds. Trying at less busy times of the day can change average processing time up to 2x. Timeout rows are shown as greater than the configured timeout value."
+    processing_ms: "Cumulative backend processing time for the image in milliseconds, including any on-demand feature or preview processing added after the row first appears. Timeout rows are shown as greater than the configured timeout value."
 };
 
 function collectColumns(group, parentId = null) {
@@ -1533,6 +1533,10 @@ function makeBatchState(files, settings, requestLineOcr) {
         elapsedMs: 0,
         runStartedAt: null,
         timerInterval: null,
+        onDemandRunning: false,
+        onDemandStartedAt: null,
+        onDemandTotal: 0,
+        onDemandCompleted: 0,
         abortController: null,
         running: false,
         finished: false,
@@ -1556,7 +1560,10 @@ function isActiveBatch(batch) {
 function batchElapsedMs(batch) {
     if (!batch) return 0;
     const runningMs = batch.running && batch.runStartedAt ? Date.now() - batch.runStartedAt : 0;
-    return batch.elapsedMs + runningMs;
+    const onDemandMs = !batch.running && batch.onDemandRunning && batch.onDemandStartedAt
+        ? Date.now() - batch.onDemandStartedAt
+        : 0;
+    return batch.elapsedMs + runningMs + onDemandMs;
 }
 
 function updateBatchTimer(batch) {
@@ -1565,12 +1572,53 @@ function updateBatchTimer(batch) {
 
     const elapsedMs = batchElapsedMs(batch);
     let etaStr = "Calculating...";
-    if (batch.completed > 0 && batch.completed < batch.files.length) {
+    if (!batch.running && batch.onDemandRunning && batch.onDemandTotal > 0) {
+        if (batch.onDemandCompleted > 0 && batch.onDemandCompleted < batch.onDemandTotal) {
+            const onDemandElapsed = Date.now() - batch.onDemandStartedAt;
+            const timePerRow = onDemandElapsed / batch.onDemandCompleted;
+            etaStr = formatDuration(timePerRow * (batch.onDemandTotal - batch.onDemandCompleted));
+        }
+    } else if (batch.completed > 0 && batch.completed < batch.files.length) {
         const timePerImg = elapsedMs / batch.completed;
         etaStr = formatDuration(timePerImg * (batch.files.length - batch.completed));
     }
     timerDiv.style.display = "block";
     timerDiv.innerText = `Elapsed: ${formatDuration(elapsedMs)} | ETA: ${etaStr}`;
+}
+
+function startOnDemandBatchTimer(batch, totalRows) {
+    if (!batch || totalRows <= 0) return;
+    batch.onDemandRunning = true;
+    batch.onDemandStartedAt = Date.now();
+    batch.onDemandTotal = totalRows;
+    batch.onDemandCompleted = 0;
+    updateBatchTimer(batch);
+    if (!batch.running) {
+        if (batch.timerInterval) clearInterval(batch.timerInterval);
+        batch.timerInterval = setInterval(() => {
+            if (isActiveBatch(batch) && batch.onDemandRunning) updateBatchTimer(batch);
+        }, 1000);
+    }
+}
+
+function finishOnDemandBatchTimer(batch) {
+    if (!batch || !batch.onDemandRunning) return;
+    if (!batch.running) {
+        batch.elapsedMs = batchElapsedMs(batch);
+        if (batch.timerInterval) {
+            clearInterval(batch.timerInterval);
+            batch.timerInterval = null;
+        }
+    }
+    batch.onDemandRunning = false;
+    batch.onDemandStartedAt = null;
+    batch.onDemandTotal = 0;
+    batch.onDemandCompleted = 0;
+    const timerDiv = document.getElementById("batch-timer");
+    if (timerDiv && !batch.running) {
+        timerDiv.style.display = "block";
+        timerDiv.innerText = `Total Time: ${formatDuration(batch.elapsedMs)}`;
+    }
 }
 
 function updateBatchControls(batch) {
@@ -1632,6 +1680,11 @@ function finishBatch(batch, mode) {
     batch.elapsedMs = batchElapsedMs(batch);
     batch.running = false;
     batch.runStartedAt = null;
+    if (batch.onDemandRunning && !batch.timerInterval) {
+        batch.timerInterval = setInterval(() => {
+            if (isActiveBatch(batch) && batch.onDemandRunning) updateBatchTimer(batch);
+        }, 1000);
+    }
 
     const status = document.getElementById("bulk-status");
     const timerDiv = document.getElementById("batch-timer");
@@ -1640,8 +1693,12 @@ function finishBatch(batch, mode) {
     const excludedText = "";
 
     if (timerDiv) {
-        timerDiv.style.display = "block";
-        timerDiv.innerText = `Total Time: ${formatDuration(batch.elapsedMs)}`;
+        if (batch.onDemandRunning) {
+            updateBatchTimer(batch);
+        } else {
+            timerDiv.style.display = "block";
+            timerDiv.innerText = `Total Time: ${formatDuration(batch.elapsedMs)}`;
+        }
     }
 
     if (mode === "complete") {
@@ -1847,6 +1904,7 @@ async function fallbackReprocessChunk(chunk, requestedIds, batch) {
         );
         mergeStagePatch({
             ...data,
+            stage_processing_ms: data.stage_processing_ms ?? data.processing_ms ?? null,
             session_id: data.session_id || item.data?.session_id,
             row_id: item.data?.row_id || data.row_id
         });
@@ -1859,7 +1917,15 @@ function mergeStagePatch(rowPatch) {
     const item = globalBatchResults.find(candidate => candidate.data?.row_id === rowId);
     if (!item) return;
 
-    item.data = { ...(item.data || {}), ...rowPatch };
+    const previousProcessingMs = Number(item.data?.processing_ms);
+    const extraProcessingMs = Number(rowPatch.stage_processing_ms);
+    const patch = { ...rowPatch };
+    if (Number.isFinite(extraProcessingMs) && extraProcessingMs > 0) {
+        const baseProcessingMs = Number.isFinite(previousProcessingMs) ? previousProcessingMs : 0;
+        patch.processing_ms = Math.round(baseProcessingMs + extraProcessingMs);
+    }
+
+    item.data = { ...(item.data || {}), ...patch };
     item.success = item.data.success !== false;
     item.isCm = measurementUnit(item.data) === "cm";
     item.digits = item.isCm ? 1 : 0;
@@ -1908,6 +1974,7 @@ async function runMissingStageRequest() {
     if (entries.length === 0) return;
 
     missingStageInFlight = true;
+    startOnDemandBatchTimer(batch, entries.length);
     entries.forEach(({ item, missing }) => {
         item.pendingColumnIds = new Set([...(item.pendingColumnIds || []), ...missing]);
         item.pendingStages = new Set([...(item.pendingStages || []), ...missing.map(stageForColumnId).filter(Boolean)]);
@@ -1968,9 +2035,12 @@ async function runMissingStageRequest() {
                     });
                 }
             }
+            batch.onDemandCompleted = Math.min(batch.onDemandTotal, batch.onDemandCompleted + chunk.length);
+            updateBatchTimer(batch);
             refreshBatchOutputs(document.getElementById("histograms-container"));
         }
     } finally {
+        finishOnDemandBatchTimer(batch);
         missingStageInFlight = false;
         refreshBatchOutputs(document.getElementById("histograms-container"));
         if (missingStageQueued) {

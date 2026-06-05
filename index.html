@@ -102,6 +102,7 @@
     .settings-panel textarea, .settings-panel input, .settings-panel select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #c8d1d8; border-radius: 5px; font-size: 14px; }
     .fruit-select-card select { max-width: 360px; }
     .fruit-select-card select.input-error { border-color: #c7362f; box-shadow: 0 0 0 3px rgba(199, 54, 47, 0.12); }
+    .fruit-workflow-hint { margin: 10px 0 0; max-width: 760px; color: #5b6470; line-height: 1.45; }
     .fruit-select-message { display: none; color: #c7362f; margin: 8px 0 0; }
     .fruit-select-message.visible { display: block; }
     .required-mark { color: #c7362f; }
@@ -172,6 +173,7 @@
         <option value="watermelon">Watermelon</option>
         <option value="bell_pepper" disabled>Bell Pepper (Under Construction)</option>
       </select>
+      <p class="fruit-workflow-hint">Start by selecting a fruit type. Use Analysis Settings below to configure the phenotypic features you want to analyze, then move to Single Image Analysis or Bulk Image Analysis to schedule a processing job. See the Help section at the bottom of this page for explanations of each feature.</p>
       <p id="fruit-select-status" class="fruit-select-message">Select Fruit is required before processing.</p>
     </section>
 
