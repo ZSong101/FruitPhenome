@@ -2408,6 +2408,10 @@ function styleBatchJumpButton(button, disabled) {
     button.style.fontSize = "19px";
     button.style.fontWeight = "800";
     button.style.lineHeight = "1";
+    button.style.display = "inline-flex";
+    button.style.alignItems = "center";
+    button.style.justifyContent = "center";
+    button.style.padding = "0";
     button.style.boxShadow = disabled ? "none" : "0 6px 18px rgba(30, 44, 55, 0.13)";
     button.style.cursor = disabled ? "default" : "pointer";
     button.style.opacity = disabled ? "0.28" : "0.78";
