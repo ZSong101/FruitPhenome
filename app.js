@@ -12,6 +12,7 @@ const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621
 let currentPassword = ""; // Stores the password in memory after a successful login
 let currentUsername = ""; // Stores user identity
 let currentSessionId = "";
+let queuePollingIntervalId = null;
 
 function makeClientId(prefix = "id") {
     if (window.crypto?.randomUUID) return `${prefix}_${window.crypto.randomUUID()}`;
@@ -2035,6 +2036,40 @@ function markUnavailableMissingColumns(item, requestedIds) {
     }
 }
 
+function rebuildPendingStages(item) {
+    const pendingIds = item.pendingColumnIds instanceof Set ? item.pendingColumnIds : new Set();
+    item.pendingStages = new Set([...pendingIds].map(stageForColumnId).filter(Boolean));
+}
+
+function markPendingColumns(item, columnIds) {
+    const ids = (columnIds || []).filter(Boolean);
+    if (ids.length === 0) return;
+    item.pendingColumnIds = new Set([...(item.pendingColumnIds || []), ...ids]);
+    rebuildPendingStages(item);
+}
+
+function clearPendingColumns(item, columnIds = null) {
+    if (!(item.pendingColumnIds instanceof Set)) {
+        item.pendingColumnIds = new Set();
+        item.pendingStages = new Set();
+        return;
+    }
+    if (Array.isArray(columnIds)) {
+        columnIds.forEach(id => item.pendingColumnIds.delete(id));
+    } else {
+        item.pendingColumnIds.clear();
+    }
+    rebuildPendingStages(item);
+}
+
+function markCurrentlyMissingColumnsPending(batch, requestedIds) {
+    const entries = globalBatchResults
+        .map(item => ({ item, missing: missingColumnsForItem(item, batch, requestedIds) }))
+        .filter(entry => entry.missing.length > 0);
+    entries.forEach(({ item, missing }) => markPendingColumns(item, missing));
+    return entries;
+}
+
 function scheduleMissingStageRequest() {
     if (!activeBatch || globalBatchResults.length === 0) return;
     clearTimeout(missingStageTimer);
@@ -2042,17 +2077,18 @@ function scheduleMissingStageRequest() {
 }
 
 async function runMissingStageRequest() {
-    if (missingStageInFlight) {
-        missingStageQueued = true;
-        return;
-    }
     const batch = activeBatch;
     if (!batch) return;
 
     const requestedIds = selectedColumnIdsForRequest();
-    const entries = globalBatchResults
-        .map(item => ({ item, missing: missingColumnsForItem(item, batch, requestedIds) }))
-        .filter(entry => entry.missing.length > 0);
+    if (missingStageInFlight) {
+        markCurrentlyMissingColumnsPending(batch, requestedIds);
+        missingStageQueued = true;
+        refreshBatchOutputs(document.getElementById("histograms-container"), { debounceHistograms: true });
+        return;
+    }
+
+    const entries = markCurrentlyMissingColumnsPending(batch, requestedIds);
     if (entries.length === 0) return;
 
     missingStageInFlight = true;
@@ -2060,10 +2096,6 @@ async function runMissingStageRequest() {
     batch.onDemandAbortController = new AbortController();
     startOnDemandBatchTimer(batch, entries.length);
     updateBatchControls(batch);
-    entries.forEach(({ item, missing }) => {
-        item.pendingColumnIds = new Set([...(item.pendingColumnIds || []), ...missing]);
-        item.pendingStages = new Set([...(item.pendingStages || []), ...missing.map(stageForColumnId).filter(Boolean)]);
-    });
     refreshBatchOutputs(document.getElementById("histograms-container"), { debounceHistograms: true });
 
     try {
@@ -2081,16 +2113,14 @@ async function runMissingStageRequest() {
                     (response.rows || []).forEach(mergeStagePatch);
                 }
                 chunk.forEach(({ item }) => {
-                    item.pendingColumnIds = new Set();
-                    item.pendingStages = new Set();
+                    clearPendingColumns(item, chunkRequestedIds);
                     markUnavailableMissingColumns(item, chunkRequestedIds);
                 });
             } catch (err) {
                 const stopped = batch.onDemandStopRequested || err.name === "AbortError" || err.message === "Batch stopped";
                 if (stopped) {
                     chunk.forEach(({ item }) => {
-                        item.pendingColumnIds = new Set();
-                        item.pendingStages = new Set();
+                        clearPendingColumns(item, chunkRequestedIds);
                     });
                     break;
                 }
@@ -2099,14 +2129,12 @@ async function runMissingStageRequest() {
                     try {
                         await fallbackReprocessChunk(chunk, chunkRequestedIds, batch, batch.onDemandAbortController.signal);
                         chunk.forEach(({ item }) => {
-                            item.pendingColumnIds = new Set();
-                            item.pendingStages = new Set();
+                            clearPendingColumns(item, chunkRequestedIds);
                             markUnavailableMissingColumns(item, chunkRequestedIds);
                         });
                     } catch (fallbackErr) {
                         chunk.forEach(({ item }) => {
-                            item.pendingColumnIds = new Set();
-                            item.pendingStages = new Set();
+                            clearPendingColumns(item, chunkRequestedIds);
                             markUnavailableMissingColumns(item, chunkRequestedIds);
                             const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
                             item.data = {
@@ -2118,8 +2146,7 @@ async function runMissingStageRequest() {
                     }
                 } else {
                     chunk.forEach(({ item }) => {
-                        item.pendingColumnIds = new Set();
-                        item.pendingStages = new Set();
+                        clearPendingColumns(item, chunkRequestedIds);
                         markUnavailableMissingColumns(item, chunkRequestedIds);
                         const warnings = Array.isArray(item.data?.warnings) ? item.data.warnings : [];
                         item.data = {
@@ -2913,7 +2940,6 @@ function openLightbox(fullSrc, fallbackSrc = "") {
     const primarySrc = fullSrc || fallbackSrc;
     if (!primarySrc) return;
 
-    let attemptedFallback = false;
     lightbox.style.display = "flex";
     lightboxImg.style.display = "none";
     lightboxImg.onload = null;
@@ -2933,12 +2959,6 @@ function openLightbox(fullSrc, fallbackSrc = "") {
     };
 
     lightboxImg.onerror = () => {
-        if (!attemptedFallback && fallbackSrc && fallbackSrc !== lightboxImg.src) {
-            attemptedFallback = true;
-            if (lightboxStatus) lightboxStatus.innerText = "Loading preview...";
-            lightboxImg.src = fallbackSrc;
-            return;
-        }
         lightboxImg.style.display = "none";
         if (lightboxStatus) {
             lightboxStatus.innerText = "Preview failed to load.";
@@ -2980,9 +3000,11 @@ window.addEventListener("pagehide", clearPreviewSessionBeacon);
 
 // --- LIVE QUEUE POLLING ---
 function startQueuePolling() {
+    if (queuePollingIntervalId) clearInterval(queuePollingIntervalId);
     const baseUrl = API_URL.split("/proxy_process")[0];
     
-    setInterval(async () => {
+    const poll = async () => {
+        if (document.hidden) return;
         // --- FIX: Added '&_t=' cache buster so the browser fetches fresh data every time ---
         const statusEndpoint = `${baseUrl}/proxy_status?username=${encodeURIComponent(currentUsername)}&_t=${Date.now()}`;
         
@@ -3012,5 +3034,8 @@ function startQueuePolling() {
         } catch (err) {
             // Silently ignore network blips during polling
         }
-    }, 2000); 
+    };
+
+    poll();
+    queuePollingIntervalId = setInterval(poll, 15000); 
 }
