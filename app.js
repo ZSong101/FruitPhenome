@@ -1665,7 +1665,7 @@ function updateBatchControls(batch) {
 }
 
 function isAnalysisSettingsLocked() {
-    return Boolean(activeBatch && !activeBatch.finished && activeBatch.nextIndex < activeBatch.files.length);
+    return Boolean(activeBatch && (activeBatch.running || activeBatch.onDemandRunning));
 }
 
 function updateAnalysisSettingsLock() {
