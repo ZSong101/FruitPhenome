@@ -99,6 +99,191 @@ function initAppTabs() {
 setLastUpdatedStamp();
 initAppTabs();
 
+const ARUCO_PRINT_CODES = [
+    { label: "4x4", file: "4x4_1000-0.svg", sizeMm: 10 },
+    { label: "5x5", file: "5x5_1000-0.svg", sizeMm: 50 },
+    { label: "6x6", file: "6x6_1000-0.svg", sizeMm: 100 }
+];
+
+function setArucoPdfStatus(message, isError = false) {
+    const status = document.getElementById("aruco-pdf-status");
+    if (!status) return;
+    status.innerText = message || "";
+    status.classList.toggle("error", Boolean(isError));
+}
+
+function loadPdfImage(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`Could not load ${src}`));
+        img.src = src;
+    });
+}
+
+async function rasterizeSquareForPdf(src, pixelSize = 900) {
+    const img = await loadPdfImage(src);
+    const canvas = document.createElement("canvas");
+    canvas.width = pixelSize;
+    canvas.height = pixelSize;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, pixelSize, pixelSize);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0, pixelSize, pixelSize);
+    return canvas.toDataURL("image/png");
+}
+
+async function rasterizeLogoForPdf(src) {
+    const img = await loadPdfImage(src);
+    const maxWidth = 900;
+    const scale = Math.min(1, maxWidth / Math.max(1, img.naturalWidth || img.width));
+    const width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+    const height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, width, height);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    const refIdx = ((height - 1) * width + (width - 1)) * 4;
+    const ref = [data[refIdx], data[refIdx + 1], data[refIdx + 2], data[refIdx + 3]];
+    const tolerance = 36;
+    for (let i = 0; i < data.length; i += 4) {
+        const alpha = data[i + 3];
+        const colorDistance = Math.hypot(data[i] - ref[0], data[i + 1] - ref[1], data[i + 2] - ref[2]);
+        if (alpha < 10 || (ref[3] > 10 && colorDistance <= tolerance)) {
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+            data[i + 3] = 255;
+        }
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return { dataUrl: canvas.toDataURL("image/png"), width, height };
+}
+
+function drawPdfDimensionGuide(pdf, x, y, sizeMm, label) {
+    const guideY = y + sizeMm + 4;
+    pdf.setDrawColor(65, 75, 82);
+    pdf.setLineWidth(0.25);
+    pdf.line(x, guideY, x + sizeMm, guideY);
+    pdf.line(x, guideY - 2, x, guideY + 2);
+    pdf.line(x + sizeMm, guideY - 2, x + sizeMm, guideY + 2);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8);
+    pdf.setTextColor(30, 42, 50);
+    pdf.text(`${label}: ${sizeMm} mm x ${sizeMm} mm`, x + sizeMm / 2, guideY + 5.2, { align: "center" });
+}
+
+function drawPdfMarker(pdf, marker, dataUrl, x, y) {
+    pdf.addImage(dataUrl, "PNG", x, y, marker.sizeMm, marker.sizeMm);
+    pdf.setDrawColor(30, 42, 50);
+    pdf.setLineWidth(0.25);
+    pdf.rect(x, y, marker.sizeMm, marker.sizeMm);
+    drawPdfDimensionGuide(pdf, x, y, marker.sizeMm, marker.label);
+}
+
+async function generateArucoPrintSheetPdf() {
+    const jsPDF = window.jspdf?.jsPDF;
+    if (!jsPDF) throw new Error("PDF library failed to load. Refresh the page and try again.");
+
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const margin = 14;
+    const platformName = "Specialty Crop Fruit Phenotyping Platform";
+    const siteUrl = "https://zsong101.github.io/FruitPhenome/";
+
+    pdf.setProperties({
+        title: "ArUco Calibration Codes",
+        subject: "Printable ArUco size calibration sheet",
+        creator: platformName
+    });
+
+    let titleX = margin;
+    try {
+        const logo = await rasterizeLogoForPdf("lab_logo.png");
+        const logoW = 36;
+        const logoH = logoW * (logo.height / Math.max(1, logo.width));
+        pdf.addImage(logo.dataUrl, "PNG", margin, 7, logoW, logoH);
+        titleX = margin + logoW + 4;
+    } catch (error) {
+        console.warn(error);
+    }
+
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10);
+    pdf.setTextColor(30, 42, 50);
+    pdf.text("Specialty Crop Fruit\nPhenotyping Platform", titleX, 10.5);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(70, 82, 90);
+    pdf.text(siteUrl, pageW - margin, 10.5, { align: "right" });
+
+    const introText = "Make sure one of these codes is printed out and visible in your images. Which one you use will depend on the size of the fruit you’re trying to phenotype. As long as one of these codes is fully visible in each of your images, it doesn’t matter which you use.\nMake sure that they are printed to the correct size indicated below.";
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.setTextColor(30, 42, 50);
+    const introLines = pdf.splitTextToSize(introText, pageW - margin * 2);
+    const introY = 30;
+    pdf.text(introLines, margin, introY);
+
+    const markerImages = await Promise.all(ARUCO_PRINT_CODES.map(async marker => ({
+        marker,
+        dataUrl: await rasterizeSquareForPdf(marker.file, Math.max(520, Math.round(marker.sizeMm * 16)))
+    })));
+
+    const markerTopY = Math.max(54, introY + introLines.length * 4.2 + 8);
+    const marker4 = markerImages.find(item => item.marker.label === "4x4");
+    const marker5 = markerImages.find(item => item.marker.label === "5x5");
+    const marker6 = markerImages.find(item => item.marker.label === "6x6");
+    if (marker4) drawPdfMarker(pdf, marker4.marker, marker4.dataUrl, margin + 8, markerTopY + 18);
+    if (marker5) drawPdfMarker(pdf, marker5.marker, marker5.dataUrl, margin + 58, markerTopY + 4);
+    if (marker6) drawPdfMarker(pdf, marker6.marker, marker6.dataUrl, (pageW - marker6.marker.sizeMm) / 2, markerTopY + 72);
+
+    const closingY = markerTopY + 72 + 100 + 18;
+    const closingText = "You may cut out the code you intend to use, but ensure that it lies flat and flush in the image. It may help to glue it to a hard flat surface like a table or a small card.";
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.setTextColor(30, 42, 50);
+    pdf.text(pdf.splitTextToSize(closingText, pageW - margin * 2), margin, closingY);
+
+    const timestamp = new Intl.DateTimeFormat("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short"
+    }).format(new Date());
+    pdf.setFontSize(8);
+    pdf.setTextColor(90, 104, 114);
+    pdf.text(timestamp, pageW - margin, pageH - 8, { align: "right" });
+
+    pdf.save("aruco_calibration_codes.pdf");
+}
+
+function setupArucoPdfDownload() {
+    const button = document.getElementById("download-aruco-pdf-btn");
+    if (!button) return;
+    button.addEventListener("click", async () => {
+        button.disabled = true;
+        setArucoPdfStatus("Generating PDF...");
+        try {
+            await generateArucoPrintSheetPdf();
+            setArucoPdfStatus("PDF downloaded.");
+            setTimeout(() => setArucoPdfStatus(""), 2500);
+        } catch (error) {
+            console.error(error);
+            setArucoPdfStatus(error.message || "PDF generation failed.", true);
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
 async function sha256(message) {
     const msgBuffer = new TextEncoder().encode(message);
     const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
@@ -300,6 +485,7 @@ function updateSettingsSliderLabels() {
 }
 
 function setupAnalysisSettingsControls() {
+    setupArucoPdfDownload();
     updateSettingsSliderLabels();
     document.querySelectorAll("#analysis-settings-fieldset input[type='range']").forEach(input => {
         input.addEventListener("input", updateSettingsSliderLabels);
