@@ -39,11 +39,13 @@
     .table-wrap { width: 100%; overflow-x: auto; margin-top: 20px; padding-bottom: 6px; }
     #download-csv-btn { display: none; font-weight: bold; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
     #download-csv-btn:hover { background: #0056b3; }
-    #stop-batch-btn, #resume-batch-btn { display: none; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; }
-    #stop-batch-btn { background: #c7362f; }
-    #stop-batch-btn:hover { background: #a82c27; }
+    #stop-batch-btn, #resume-batch-btn, #stop-single-btn { display: none; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; }
+    #stop-batch-btn, #stop-single-btn { background: #c7362f; }
+    #stop-batch-btn:hover, #stop-single-btn:hover { background: #a82c27; }
+    #stop-batch-btn.confirming-stop, #stop-single-btn.confirming-stop { background: #8f241f; }
     #resume-batch-btn { background: #5f6f7a; }
     #resume-batch-btn:hover { background: #4d5b64; }
+    button:disabled { opacity: 0.58; cursor: not-allowed; }
     .lightbox-overlay { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.85); justify-content: center; align-items: center; }
     .lightbox-content { max-width: 90%; max-height: 90%; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
     .lightbox-status { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: white; font-size: 16px; font-weight: 700; letter-spacing: 0; }
@@ -72,9 +74,10 @@
     .column-title-wrap { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
     .column-dragging { opacity: 0.45; }
     .column-drop-target { outline: 2px solid #1170ff; outline-offset: -2px; background: #eaf2ff !important; }
-    .bulk-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .analysis-toolbar, .bulk-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px; }
+    .toolbar-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-left: auto; }
     .column-dropdown { position: relative; display: inline-flex; align-items: center; }
-    .bulk-toolbar button, .single-toolbar button, .settings-column-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
+    .bulk-toolbar button, .single-toolbar button, .settings-column-toolbar button, .analysis-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
     #column-menu-button, #single-column-menu-button, #main-column-menu-button { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding-right: 28px; position: relative; }
     #column-menu-button::after, #single-column-menu-button::after, #main-column-menu-button::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #4a5963; }
     #column-menu-button:hover, #single-column-menu-button:hover, #main-column-menu-button:hover { background: #e1e6eb; }
@@ -97,11 +100,23 @@
     .settings-check { display: flex !important; align-items: flex-start; gap: 8px; margin: 0 !important; padding: 9px 10px; border: 1px solid #d8e1e8; border-radius: 6px; background: #f8fafb; font-weight: 700; line-height: 1.35; min-width: 0; }
     .settings-check > span { min-width: 0; }
     .settings-panel .settings-check input[type="checkbox"] { width: 16px; height: 16px; min-width: 16px; padding: 0; margin: 2px 0 0; flex: 0 0 16px; }
+    .colorchecker-reference { display: flex; align-items: center; gap: 14px; margin: -4px 0 16px; padding: 10px 12px; border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; }
+    .colorchecker-reference img { width: 92px; max-width: 30vw; height: auto; border: 1px solid #ccd8df; border-radius: 6px; background: #fff; }
+    .colorchecker-reference p { margin: 0; color: #4a5963; line-height: 1.42; }
     .rich-help { position: relative; overflow: visible; }
     .help-popover { display: none; position: absolute; z-index: 80; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 48px)); padding: 10px 12px; border: 1px solid #a8cce8; border-radius: 7px; background: #f4faff; color: #1f3545; box-shadow: 0 10px 28px rgba(0,0,0,0.18); font-size: 13px; font-weight: 500; line-height: 1.4; text-align: left; }
     .rich-help:hover .help-popover, .rich-help:focus .help-popover, .rich-help:focus-within .help-popover { display: block; }
     .help-popover a { color: #135f9a; font-weight: 700; }
-    .single-toolbar, .settings-column-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 16px; }
+    .single-toolbar, .settings-column-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px; }
+    .file-form { margin-bottom: 0; }
+    .progress-wrap { display: none; height: 8px; width: 100%; overflow: hidden; border-radius: 999px; background: #e7edf2; box-shadow: inset 0 0 0 1px rgba(80, 99, 112, 0.08); margin: 8px 0 12px; }
+    .progress-wrap.visible { display: block; }
+    .progress-bar { height: 100%; width: 0%; border-radius: inherit; background: linear-gradient(90deg, #1170ff, #49a3ff); transition: width 180ms ease; }
+    .progress-bar.indeterminate { width: 34%; animation: progress-indeterminate 1.15s ease-in-out infinite; }
+    @keyframes progress-indeterminate {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(320%); }
+    }
     .aruco-pdf-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 16px; padding: 10px 12px; border: 1px solid #d8e1e8; border-radius: 8px; background: #f8fafb; }
     #download-aruco-pdf-btn { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; font-weight: 700; }
     #download-aruco-pdf-btn:hover:not(:disabled) { background: #e1e6eb; }
@@ -134,6 +149,32 @@
     .slider-value { font-variant-numeric: tabular-nums; color: #38454f; text-align: right; }
     .settings-lock-note { display: none; margin-top: 8px; }
     .settings-locked .settings-lock-note { display: block; }
+    .wizard-step { display: none; }
+    .wizard-step.active { display: block; }
+    .wizard-step-title { margin: 0 0 14px; }
+    .wizard-step-indicator { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 4px 0 20px; }
+    .wizard-indicator-item { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; color: #8a97a1; }
+    .wizard-indicator-item .wizard-dot { width: 22px; height: 22px; border-radius: 50%; background: #e3eaf0; color: #5b6a75; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex: 0 0 auto; }
+    .wizard-indicator-item.current { color: #1f3545; }
+    .wizard-indicator-item.current .wizard-dot { background: #1170ff; color: #fff; }
+    .wizard-indicator-item.done { color: #2c6e49; }
+    .wizard-indicator-item.done .wizard-dot { background: #d2ead9; color: #2c6e49; }
+    .wizard-nav { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; }
+    .wizard-nav button { min-width: 110px; min-height: 40px; padding: 10px 15px; font-weight: 700; border-radius: 6px; cursor: pointer; }
+    #wizard-back-btn { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; }
+    #wizard-back-btn:hover:not(:disabled) { background: #e1e6eb; }
+    #wizard-next-btn { background: #007bff; color: white; border: none; }
+    #wizard-next-btn:hover:not(:disabled) { background: #0056b3; }
+    .wizard-summary { display: grid; gap: 8px; margin-bottom: 16px; }
+    .wizard-summary-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; border: 1px solid #d8e1e8; border-radius: 6px; background: #f8fafb; }
+    .wizard-summary-label { font-weight: 700; min-width: 160px; color: #1f3545; }
+    .wizard-summary-value { flex: 1; color: #38454f; line-height: 1.4; }
+    .wizard-edit-btn { margin-left: auto; flex: 0 0 auto; background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding: 5px 14px; font-weight: 700; cursor: pointer; }
+    .wizard-edit-btn:hover:not(:disabled) { background: #e1e6eb; }
+    @media (max-width: 760px) {
+      .wizard-summary-row { flex-wrap: wrap; }
+      .wizard-summary-label { min-width: 0; width: 100%; }
+    }
     .help-tree { display: grid; gap: 8px; }
     .help-group, .help-entry { border: 1px solid #e0e6eb; border-radius: 6px; background: #fff; }
     .help-group { padding: 8px; }
@@ -187,121 +228,135 @@
     </nav>
 
     <div class="tab-panel active" id="settings-panel" role="tabpanel" aria-labelledby="settings-tab">
-    <section id="fruit-select-card" class="card settings-panel fruit-select-card">
-      <label for="fruit-select" class="setting-label">Select Fruit <span class="required-mark">*</span><span class="column-help-icon" title="Required. Choose the crop-specific analysis workflow before processing.">?</span></label>
-      <select id="fruit-select" required aria-required="true">
-        <option value="" selected disabled>Select fruit...</option>
-        <option value="watermelon">Watermelon</option>
-        <option value="bell_pepper" disabled>Bell Pepper (Under Construction)</option>
-        <option value="bell_pepper" disabled>Other (requires minimal manual masking) (Under Construction)</option>
-      </select>
-      <p class="fruit-workflow-hint">Start by selecting a fruit type. Use Analysis Settings below to configure the phenotypic features you want to analyze, then move to Single Image Analysis or Bulk Image Analysis to schedule a processing job. See the Help section at the bottom of this page for explanations of each feature.</p>
-      <p id="fruit-select-status" class="fruit-select-message">Select Fruit is required before processing.</p>
-    </section>
-
     <section id="analysis-settings-card" class="card settings-panel">
-      <h2>Analysis Settings</h2>
-      <div class="aruco-pdf-tools">
-        <button type="button" id="download-aruco-pdf-btn">Download ArUco Print Sheet</button>
-        <span id="aruco-pdf-status" class="muted" role="status"></span>
+      <h2>Analysis Setup</h2>
+      <div id="wizard-step-indicator" class="wizard-step-indicator"></div>
+
+      <div class="wizard-step" data-step="1">
+        <h3 class="wizard-step-title">Step 1: Select your fruit</h3>
+        <div class="fruit-select-card">
+          <label for="fruit-select" class="setting-label">Select Fruit <span class="required-mark">*</span><span class="column-help-icon" title="Required. Choose the crop-specific analysis workflow before processing.">?</span></label>
+          <select id="fruit-select" required aria-required="true">
+            <option value="" selected disabled>Select fruit...</option>
+            <option value="watermelon">Watermelon</option>
+            <option value="bell_pepper" disabled>Bell Pepper (Under Construction)</option>
+            <option value="bell_pepper" disabled>Other (requires minimal manual masking) (Under Construction)</option>
+          </select>
+          <p class="fruit-workflow-hint">This walkthrough configures your analysis step by step: select a fruit type, answer a few questions about your images, then review your setup. Once finished, move to Single Image Analysis or Bulk Image Analysis to schedule a processing job. See the Help section at the bottom of this page for explanations of each feature.</p>
+          <p id="fruit-select-status" class="fruit-select-message">Select Fruit is required before continuing.</p>
+        </div>
       </div>
+
       <fieldset id="analysis-settings-fieldset" class="settings-fieldset">
-        <div class="settings-checks">
-          <label class="settings-check" for="read-labels-input">
-            <input type="checkbox" id="read-labels-input">
-            <span>On-screen labels
-              <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Check this when images contain visible Line labels that should be read into the Line columns. Please be aware that handwritten digit recognition may not be 100% accurate.</span>
-              </span>
-            </span>
-          </label>
-          <label class="settings-check" for="use-color-checker-input">
-            <input type="checkbox" id="use-color-checker-input" checked>
-            <span>Calibrite ColorChecker Passport Photo 2 present
-              <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">The ColorChecker is used for color correction and automatic cm/pixel scale calibration. Product reference: <a href="https://calibrite.com/us/product/colorchecker-passport-photo-2/" target="_blank" rel="noopener noreferrer">Calibrite ColorChecker Passport Photo 2</a>.</span>
-              </span>
-            </span>
-          </label>
-          <label class="settings-check" for="mode-standard-input">
-            <input type="checkbox" id="mode-standard-input" checked>
-            <span>Standard Features
-              <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Select cleanup-mask measurements. These are the standard feature columns measured after mask cleanup, before optional smoothing or Legacy Features (TA).</span>
-              </span>
-            </span>
-          </label>
-          <label class="settings-check" for="mode-smoothing-input">
-            <input type="checkbox" id="mode-smoothing-input" checked>
-            <span>Smoothing
-              <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Select smoothed function-fit measurements. This adds the smoothed feature columns without changing the other feature selectors.</span>
-              </span>
-            </span>
-          </label>
-          <label class="settings-check" for="mode-legacy-ta-input">
-            <input type="checkbox" id="mode-legacy-ta-input">
-            <span>Legacy Features (TA)
-              <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Select Tomato Analyzer-derived Legacy Features (TA). This adds the TA feature columns without changing the other feature selectors.</span>
-              </span>
-            </span>
-          </label>
-          <label class="settings-check" for="mode-visual-comparison-input">
-            <input type="checkbox" id="mode-visual-comparison-input">
-            <span>Visual Comparison
-              <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Select diagnostic preview images for visual comparison. This adds the preview columns without changing the other feature selectors.</span>
-              </span>
-            </span>
-          </label>
-          <label class="settings-check" for="mode-all-features-input">
-            <input type="checkbox" id="mode-all-features-input">
-            <span>All Features
-              <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Select every available output column, including experimental features, Legacy Features (TA), run information, and previews. You can still fine-tune the exact columns below.</span>
-              </span>
-            </span>
-          </label>
-        </div>
-        <div class="settings-column-toolbar">
-          <div class="column-dropdown">
-            <button type="button" id="main-column-menu-button" aria-expanded="false">Columns</button>
-            <div id="main-column-menu-panel" class="column-menu-panel">
-              <div id="main-column-menu"></div>
-            </div>
-          </div>
-        </div>
-        <div class="settings-grid">
-          <div>
-            <div id="line-settings-block" class="dependent-settings">
-              <label for="line-options-input" class="setting-label">Possible Lines
+        <div class="wizard-step" data-step="2">
+          <h3 class="wizard-step-title">Step 2: Scale and color calibration</h3>
+          <div class="settings-checks">
+            <label class="settings-check" for="use-color-checker-input">
+              <input type="checkbox" id="use-color-checker-input" checked>
+              <span>Calibrite ColorChecker Passport Photo 2 present
                 <span class="column-help-icon rich-help" tabindex="0">?
-                  <span class="help-popover">Optional comma-separated list of expected Line IDs. When on-screen label reading is enabled, OCR output is matched against this list so the app chooses the closest listed Line rather than a free-form read; handwritten digit recognition may still need manual review.</span>
+                  <span class="help-popover">The ColorChecker is used for color correction and automatic cm/pixel scale calibration. Use the middle Passport page, the 24-patch target that looks like the reference image shown below. Product reference: <a href="https://calibrite.com/us/product/colorchecker-passport-photo-2/" target="_blank" rel="noopener noreferrer">Calibrite ColorChecker Passport Photo 2</a>.</span>
                 </span>
-              </label>
-              <textarea id="line-options-input" placeholder="Example: 12-4, 12-5, 13-1. Optional."></textarea>
-              <p class="muted">Separate possible Line IDs with commas. Text recognition will search for a match within this list.</p>
-            </div>
-
-            <div class="scale-row">
-              <div>
-                <label for="scale-value-input" class="setting-label">Manual Scale <span class="column-help-icon" title="Optional physical scale override. If supplied, this user-defined conversion is used for cm and cm² measurements instead of estimating scale from the ColorChecker.">?</span></label>
-                <input type="number" id="scale-value-input" min="0" step="any" placeholder="Optional">
-              </div>
-              <div>
-                <label for="scale-unit-select" class="setting-label">Scale Unit <span class="column-help-icon" title="Choose whether the manual scale value is centimeters per pixel or pixels per centimeter. Leave Manual Scale blank to require ColorChecker-derived scale.">?</span></label>
-                <select id="scale-unit-select">
-                  <option value="cm_per_px">cm/pixel</option>
-                  <option value="px_per_cm">pixels/cm</option>
-                </select>
-              </div>
-            </div>
-            <p class="muted">If blank, the ColorChecker must be detected for metric outputs.</p>
+              </span>
+            </label>
           </div>
+          <div class="colorchecker-reference">
+            <img src="reference.png" alt="Reference ColorChecker target: use the middle Passport page">
+            <p><strong>ColorChecker reference:</strong> use the middle page of the Calibrite ColorChecker Passport Photo 2, the 24-patch page that looks like this reference image.</p>
+          </div>
+          <div class="aruco-pdf-tools">
+            <button type="button" id="download-aruco-pdf-btn">Download ArUco Print Sheet</button>
+            <span id="aruco-pdf-status" class="muted" role="status"></span>
+          </div>
+          <div class="scale-row">
+            <div>
+              <label for="scale-value-input" class="setting-label">Manual Scale <span class="column-help-icon" title="Optional physical scale fallback. The backend first tries an ArUco marker, then the ColorChecker, then this user-defined conversion; if none are available, spatial outputs use pixels.">?</span></label>
+              <input type="number" id="scale-value-input" min="0" step="any" placeholder="Optional">
+            </div>
+            <div>
+              <label for="scale-unit-select" class="setting-label">Scale Unit <span class="column-help-icon" title="Choose whether the manual scale fallback is centimeters per pixel or pixels per centimeter. Leave Manual Scale blank to allow pixel-unit fallback when no ArUco marker or ColorChecker scale is found.">?</span></label>
+              <select id="scale-unit-select">
+                <option value="cm_per_px">cm/pixel</option>
+                <option value="px_per_cm">pixels/cm</option>
+              </select>
+            </div>
+          </div>
+          <p class="muted">Scale priority: ArUco marker, then ColorChecker, then manual scale, then pixel units.</p>
+        </div>
 
+        <div class="wizard-step" data-step="3">
+          <h3 class="wizard-step-title">Step 3: On-screen labels</h3>
+          <div class="settings-checks">
+            <label class="settings-check" for="read-labels-input">
+              <input type="checkbox" id="read-labels-input">
+              <span>On-screen labels
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Check this when images contain visible Line labels that should be read into the Line columns. Please be aware that handwritten digit recognition may not be 100% accurate.</span>
+                </span>
+              </span>
+            </label>
+          </div>
+          <div id="line-settings-block" class="dependent-settings">
+            <label for="line-options-input" class="setting-label">Possible Lines
+              <span class="column-help-icon rich-help" tabindex="0">?
+                <span class="help-popover">Optional comma-separated list of expected Line IDs. When on-screen label reading is enabled, OCR output is matched against this list so the app chooses the closest listed Line rather than a free-form read; handwritten digit recognition may still need manual review.</span>
+              </span>
+            </label>
+            <textarea id="line-options-input" placeholder="Example: 12-4, 12-5, 13-1. Optional."></textarea>
+            <p class="muted">Separate possible Line IDs with commas. Text recognition will search for a match within this list.</p>
+          </div>
+        </div>
+
+        <div class="wizard-step" data-step="4">
+          <h3 class="wizard-step-title">Step 4: Features to measure</h3>
+          <div class="settings-checks">
+            <label class="settings-check" for="mode-standard-input">
+              <input type="checkbox" id="mode-standard-input" checked>
+              <span>Standard Features
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Select cleanup-mask measurements. These are the standard feature columns measured after mask cleanup, before optional smoothing or Legacy Features (TA).</span>
+                </span>
+              </span>
+            </label>
+            <label class="settings-check" for="mode-smoothing-input">
+              <input type="checkbox" id="mode-smoothing-input" checked>
+              <span>Smoothing
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Select smoothed function-fit measurements. This adds the smoothed feature columns without changing the other feature selectors.</span>
+                </span>
+              </span>
+            </label>
+            <label class="settings-check" for="mode-legacy-ta-input">
+              <input type="checkbox" id="mode-legacy-ta-input">
+              <span>Legacy Features (TA)
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Select Tomato Analyzer-derived Legacy Features (TA). This adds the TA feature columns without changing the other feature selectors.</span>
+                </span>
+              </span>
+            </label>
+            <label class="settings-check" for="mode-visual-comparison-input">
+              <input type="checkbox" id="mode-visual-comparison-input">
+              <span>Visual Comparison
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Select diagnostic preview images for visual comparison. This adds the preview columns without changing the other feature selectors.</span>
+                </span>
+              </span>
+            </label>
+            <label class="settings-check" for="mode-all-features-input">
+              <input type="checkbox" id="mode-all-features-input">
+              <span>All Features
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Select every available output column, including experimental features, Legacy Features (TA), run information, and previews. You can still fine-tune the exact columns on the summary step.</span>
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="wizard-step" data-step="5">
+          <h3 class="wizard-step-title">Step 5: Manual feature settings</h3>
+          <p class="muted">These sliders only apply when Legacy Features (TA) are selected. If they are disabled, click Next to continue.</p>
           <div id="traditional-settings-block" class="dependent-settings">
-            <h3 style="margin-top: 0;">Traditional Feature Settings (TA)</h3>
             <div class="slider-row">
               <label for="trad-proximal-width-input" class="setting-label">Proximal width <span class="column-help-icon" title="User-defined position, as a percent of fruit height from the proximal end, used for proximal width, triangle, and proximal blockiness measurements.">?</span></label>
               <input type="range" id="trad-proximal-width-input" min="2" max="30" step="1" value="10">
@@ -324,7 +379,26 @@
             </div>
           </div>
         </div>
+
+        <div class="wizard-step" data-step="6">
+          <h3 class="wizard-step-title">Analysis setup summary</h3>
+          <p class="muted">Review your setup below. Use Edit to change a step, or fine-tune the exact output columns with the Columns menu. You can now schedule jobs from the Single Image Analysis or Bulk Image Analysis tabs.</p>
+          <div id="wizard-summary" class="wizard-summary"></div>
+          <div class="settings-column-toolbar">
+            <div class="column-dropdown">
+              <button type="button" id="main-column-menu-button" aria-expanded="false">Columns</button>
+              <div id="main-column-menu-panel" class="column-menu-panel">
+                <div id="main-column-menu"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </fieldset>
+
+      <div class="wizard-nav">
+        <button type="button" id="wizard-back-btn">Back</button>
+        <button type="button" id="wizard-next-btn">Next</button>
+      </div>
       <p class="muted settings-lock-note">Settings are locked for the current batch so resumed images use the same values.</p>
     </section>
 
@@ -337,19 +411,25 @@
     <div class="tab-panel" id="single-panel" role="tabpanel" aria-labelledby="single-tab">
     <section class="card">
       <h2>Single Image Analysis</h2>
-      <form id="single-form">
+      <form id="single-form" class="file-form">
         <input type="file" id="single-file" accept=".jpg,.jpeg,.png" required>
-        <button type="submit">Process Single</button>
       </form>
-      <div class="single-toolbar">
+      <div class="analysis-toolbar single-toolbar">
         <div class="column-dropdown">
           <button type="button" id="single-column-menu-button" aria-expanded="false">Columns</button>
           <div id="single-column-menu-panel" class="column-menu-panel">
             <div id="single-column-menu"></div>
           </div>
         </div>
+        <div class="toolbar-actions">
+          <button type="submit" id="process-single-btn" form="single-form">Process Single</button>
+          <button type="button" id="stop-single-btn">Stop</button>
+        </div>
       </div>
       <div id="single-status" class="status"></div>
+      <div id="single-progress" class="progress-wrap" aria-hidden="true">
+        <div class="progress-bar indeterminate"></div>
+      </div>
       <div id="single-result" class="result-grid"></div>
     </section>
     </div>
@@ -357,24 +437,29 @@
     <div class="tab-panel" id="bulk-panel" role="tabpanel" aria-labelledby="bulk-tab">
     <section id="bulk-section" class="card">
       <h2>Bulk Image Analysis</h2>
-      <form id="bulk-form">
+      <form id="bulk-form" class="file-form">
         <input type="file" id="bulk-files" multiple accept=".jpg,.jpeg,.png" required>
-        <button type="submit">Process Batch</button>
       </form>
-      <div id="bulk-status" class="status"></div>
-
-      <div id="batch-timer" class="muted" style="display: none; margin-top: 5px; font-family: monospace; font-size: 14px;"></div>
       
-      <div class="bulk-toolbar">
+      <div class="analysis-toolbar bulk-toolbar">
         <div class="column-dropdown">
           <button type="button" id="column-menu-button" aria-expanded="false">Columns</button>
           <div id="column-menu-panel" class="column-menu-panel">
             <div id="column-menu"></div>
           </div>
         </div>
-        <button type="button" id="stop-batch-btn">Stop Batch</button>
-        <button type="button" id="resume-batch-btn">Resume Batch</button>
-        <button id="download-csv-btn">Download CSV</button>
+        <div class="toolbar-actions">
+          <button type="submit" id="process-batch-btn" form="bulk-form">Process Batch</button>
+          <button type="button" id="stop-batch-btn">Stop Batch</button>
+          <button type="button" id="resume-batch-btn">Resume Batch</button>
+          <button type="button" id="download-csv-btn">Download CSV</button>
+        </div>
+      </div>
+      <div id="bulk-status" class="status"></div>
+
+      <div id="batch-timer" class="muted" style="display: none; margin-top: 5px; font-family: monospace; font-size: 14px;"></div>
+      <div id="bulk-progress" class="progress-wrap" aria-hidden="true">
+        <div class="progress-bar"></div>
       </div>
       
       <div class="table-wrap">

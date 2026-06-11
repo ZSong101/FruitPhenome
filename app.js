@@ -3,10 +3,11 @@
 //let API_URL = "https://fruit-proxy-cv71.onrender.com/proxy_process";
 let API_URL = "https://PPAL-SongLab-UGA-watermelon-proxy.hf.space/proxy_process";
 
-const SINGLE_REQUEST_TIMEOUT_MS = 120000; // 2 minutes
+const SINGLE_REQUEST_TIMEOUT_MS = 60000; // 1 minute
 const BULK_REQUEST_TIMEOUT_MS = 40000;
 const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
 const BULK_RETRY_MESSAGE = "Taking longer than 40 seconds. Trying again...";
+const STOP_CONFIRM_MS = 3500;
 const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621315d0";
 
 let currentPassword = ""; // Stores the password in memory after a successful login
@@ -425,22 +426,22 @@ function selectedFruit() {
     return document.getElementById("fruit-select")?.value || "";
 }
 
-function requireFruitSelection(statusEl) {
+function requireWalkthroughComplete(statusEl) {
     const fruitSelect = document.getElementById("fruit-select");
     const fruitStatus = document.getElementById("fruit-select-status");
-    if (fruitSelect?.value === "watermelon") {
+    if (wizardCompleted && fruitSelect?.value === "watermelon") {
         fruitSelect.classList.remove("input-error");
         fruitStatus?.classList.remove("visible");
         return true;
     }
 
     if (statusEl) {
-        statusEl.innerText = "Select Fruit is required. Choose fruit type on the Main tab before processing.";
+        statusEl.innerText = "Complete the Analysis Setup walkthrough on the Main tab before processing.";
     }
-    fruitSelect?.classList.add("input-error");
-    fruitStatus?.classList.add("visible");
     activateTab("settings-panel");
-    setTimeout(() => fruitSelect?.focus(), 0);
+    const targetStep = fruitSelect?.value === "watermelon" ? wizardStep : 1;
+    showWizardStep(targetStep);
+    validateWizardStep(targetStep);
     return false;
 }
 
@@ -530,6 +531,141 @@ function setupAnalysisSettingsControls() {
         event.target.classList.toggle("input-error", invalid);
         document.getElementById("fruit-select-status")?.classList.toggle("visible", invalid);
     });
+}
+
+// --- ANALYSIS SETUP WALKTHROUGH (WIZARD) ---
+const WIZARD_TOTAL_STEPS = 6;
+const WIZARD_STEP_LABELS = ["Fruit", "Scale & Calibration", "On-screen Labels", "Features", "Manual Settings", "Review"];
+let wizardStep = 1;
+let wizardCompleted = false;
+let wizardEditingFromSummary = false;
+
+function wizardStepElements() {
+    return [...document.querySelectorAll("#analysis-settings-card .wizard-step")];
+}
+
+function renderWizardIndicator() {
+    const indicator = document.getElementById("wizard-step-indicator");
+    if (!indicator) return;
+    indicator.innerHTML = WIZARD_STEP_LABELS.map((label, idx) => {
+        const step = idx + 1;
+        const done = step !== wizardStep && (wizardCompleted || step < wizardStep);
+        const state = step === wizardStep ? "current" : (done ? "done" : "");
+        return `<span class="wizard-indicator-item ${state}"><span class="wizard-dot">${done ? "&#10003;" : step}</span>${escapeHtml(label)}</span>`;
+    }).join("");
+}
+
+function updateWizardNav() {
+    const nav = document.querySelector("#analysis-settings-card .wizard-nav");
+    const backBtn = document.getElementById("wizard-back-btn");
+    const nextBtn = document.getElementById("wizard-next-btn");
+    if (!nav || !backBtn || !nextBtn) return;
+    const onSummary = wizardStep === WIZARD_TOTAL_STEPS;
+    nav.style.display = onSummary ? "none" : "flex";
+    backBtn.style.visibility = (wizardStep === 1 || wizardEditingFromSummary) ? "hidden" : "visible";
+    nextBtn.innerText = wizardEditingFromSummary ? "Done" : (wizardStep === WIZARD_TOTAL_STEPS - 1 ? "Finish" : "Next");
+    const locked = isAnalysisSettingsLocked();
+    backBtn.disabled = locked;
+    nextBtn.disabled = locked;
+}
+
+function showWizardStep(step, { fromEdit = false } = {}) {
+    wizardStep = Math.min(Math.max(Number(step) || 1, 1), WIZARD_TOTAL_STEPS);
+    wizardEditingFromSummary = fromEdit && wizardStep !== WIZARD_TOTAL_STEPS;
+    wizardStepElements().forEach(el => el.classList.toggle("active", Number(el.dataset.step) === wizardStep));
+    if (wizardStep === WIZARD_TOTAL_STEPS) {
+        wizardCompleted = true;
+        renderWizardSummary();
+    }
+    renderWizardIndicator();
+    updateWizardNav();
+}
+
+function validateWizardStep(step) {
+    if (step !== 1) return true;
+    const fruitSelect = document.getElementById("fruit-select");
+    const valid = fruitSelect?.value === "watermelon";
+    fruitSelect?.classList.toggle("input-error", !valid);
+    document.getElementById("fruit-select-status")?.classList.toggle("visible", !valid);
+    if (!valid) setTimeout(() => fruitSelect?.focus(), 0);
+    return valid;
+}
+
+function wizardNext() {
+    if (!validateWizardStep(wizardStep)) return;
+    if (wizardEditingFromSummary || wizardStep >= WIZARD_TOTAL_STEPS - 1) {
+        showWizardStep(WIZARD_TOTAL_STEPS);
+        return;
+    }
+    showWizardStep(wizardStep + 1);
+}
+
+function wizardBack() {
+    if (wizardStep > 1) showWizardStep(wizardStep - 1);
+}
+
+function wizardSummaryRows() {
+    const settings = getAnalysisSettingsSnapshot();
+    const fruitSelect = document.getElementById("fruit-select");
+    const fruitText = fruitSelect?.value
+        ? (fruitSelect.selectedOptions?.[0]?.text || fruitSelect.value)
+        : "Not selected";
+
+    const scaleBits = [settings.useColorChecker ? "ColorChecker present (color + scale)" : "No ColorChecker"];
+    scaleBits.push(settings.scaleValue
+        ? `Manual scale: ${settings.scaleValue} ${settings.scaleUnit === "px_per_cm" ? "pixels/cm" : "cm/pixel"}`
+        : "No manual scale fallback");
+
+    const labelBits = [settings.readLabels ? "Read on-screen labels" : "No on-screen label reading"];
+    if (settings.readLabels) {
+        const lineCount = (settings.lineOptions || "").split(",").map(v => v.trim()).filter(Boolean).length;
+        labelBits.push(lineCount ? `${lineCount} possible Line ID${lineCount === 1 ? "" : "s"}` : "No Line ID list");
+    }
+
+    let featureNames = [];
+    if (checkboxChecked("mode-all-features-input", false)) {
+        featureNames = ["All features"];
+    } else {
+        if (checkboxChecked("mode-standard-input", true)) featureNames.push("Standard");
+        if (checkboxChecked("mode-smoothing-input", true)) featureNames.push("Smoothing");
+        if (checkboxChecked("mode-legacy-ta-input", false)) featureNames.push("Legacy (TA)");
+        if (checkboxChecked("mode-visual-comparison-input", false)) featureNames.push("Visual comparison");
+    }
+
+    const trad = settings.traditionalSettings || {};
+    const tradValue = checkboxChecked("mode-legacy-ta-input", false) || hasVisibleColumnInGroup("traditional")
+        ? `Proximal ${trad.proximal_width_percent}% / Distal ${trad.distal_width_percent}% / Angle span ${trad.angle_sample_percent}% / Indent band ${trad.end_indentation_percent}%`
+        : "Not used (Legacy Features (TA) not selected)";
+
+    return [
+        { step: 1, label: "Fruit", value: fruitText || "Not selected" },
+        { step: 2, label: "Scale & calibration", value: scaleBits.join(" - ") },
+        { step: 3, label: "On-screen labels", value: labelBits.join(" - ") },
+        { step: 4, label: "Features", value: featureNames.join(", ") || "None selected" },
+        { step: 5, label: "Manual settings", value: tradValue }
+    ];
+}
+
+function renderWizardSummary() {
+    const container = document.getElementById("wizard-summary");
+    if (!container) return;
+    container.innerHTML = wizardSummaryRows().map(row => `
+        <div class="wizard-summary-row">
+            <span class="wizard-summary-label">${escapeHtml(row.label)}</span>
+            <span class="wizard-summary-value">${escapeHtml(row.value)}</span>
+            <button type="button" class="wizard-edit-btn" data-step="${row.step}">Edit</button>
+        </div>`).join("");
+}
+
+function initSettingsWizard() {
+    document.getElementById("wizard-back-btn")?.addEventListener("click", wizardBack);
+    document.getElementById("wizard-next-btn")?.addEventListener("click", wizardNext);
+    document.getElementById("wizard-summary")?.addEventListener("click", (event) => {
+        const editBtn = event.target.closest?.(".wizard-edit-btn");
+        if (!editBtn || isAnalysisSettingsLocked()) return;
+        showWizardStep(Number(editBtn.dataset.step), { fromEdit: true });
+    });
+    showWizardStep(1);
 }
 
 async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null, settings = null, includeLineOcr = null, rowId = null, requestedColumnIdsOverride = null) {
@@ -835,6 +971,7 @@ const COLUMN_GROUPS = [
             metricColumn("line", "Line", "line", 0, { histogram: false }),
             metricColumn("line_confidence", "Line Confidence", "line_confidence", 2),
             metricColumn("line_orientation", "Orientation", "line_orientation", 0, { histogram: false, get: (data) => valueOrNull(data.line_orientation) }),
+            metricColumn("qr_data", "QR Data", "qr_data", 0, { histogram: false }),
             metricColumn("processing_ms", "Time (ms)", "processing_ms", 0, {
                 histogramOverflow: BULK_REQUEST_TIMEOUT_MS,
                 display: (value, item) => item.data?.processing_ms_timeout ? `>${BULK_REQUEST_TIMEOUT_MS}` : (isNumber(value) ? fmt(value, 0) : "N/A"),
@@ -848,7 +985,7 @@ const GROUP_HELP_TEXT = {
     experimental: "Measurements derived from the model masks and the app's post-processing pipeline. These are the main outputs for this watermelon workflow.",
     experimental_raw: "Cleanup features are measured from the cleaned segmentation masks after artifact removal and mask smoothing. These values are not from the original raw YOLO masks.",
     experimental_smoothed: "Smoothed features are measured from the fitted perimeter and flesh functions. They are useful when you want less sensitivity to jagged mask edges.",
-    experimental_color: "Color calibration diagnostics describe whether the ColorChecker-based correction was reliable and how much the patch colors changed.",
+    experimental_color: "Color calibration diagnostics describe whether the ColorChecker-based correction was reliable and how much the patch colors changed. Use the middle Passport page, the 24-patch target that looks like the reference image in Analysis Settings.",
     traditional: "Traditional (TA) features are boundary-based morphology descriptors modeled after Tomato Analyzer fruit shape measurements. All features marked with (TA) are derived from Tomato Analyzer.",
     traditional_shape_index: "Shape index features (TA) describe whether the fruit is elongated, squat, triangular, or balanced in height and width.",
     traditional_eccentric: "Eccentricity and asymmetry features (TA) describe whether the widest portion is shifted toward one end and how asymmetric the shape is across horizontal or vertical axes.",
@@ -856,7 +993,7 @@ const GROUP_HELP_TEXT = {
     traditional_fit: "Common-shape fit features (TA) compare the cleaned fruit boundary to simple geometric or named fruit-shape templates.",
     previews: "Preview columns return diagnostic images. They are excluded from histograms and CSV downloads.",
     previews_standard: "Standard previews show the OCR, calibration, mask cleanup, smoothing, and traditional-feature overlays requested for each image.",
-    run_info: "Run information columns describe OCR metadata and processing time rather than fruit morphology."
+    run_info: "Run information columns describe OCR metadata, QR code data, and processing time rather than fruit morphology."
 };
 
 const GROUP_HELP_HTML = {
@@ -899,8 +1036,8 @@ const COLUMN_HELP_TEXT = {
     sm_proximal_angle: "Endpoint angle in degrees at the smoothed proximal divot. The angle is derived from the fitted endpoint geometry rather than the raw boundary.",
     sm_distal_angle: "Endpoint angle in degrees at the smoothed distal divot. It is intended to preserve tip curvature that ordinary smoothing can flatten.",
     midline_curvature: "Curvature score for the estimated flesh midline. Larger values indicate a more curved midline between the two flesh halves.",
-    color_calibration_confidence: "Overall confidence score for ColorChecker-based calibration. Low values suggest that scale or color correction should be inspected.",
-    delta_e_initial: "Average ColorChecker color error before correction. Smaller values mean the uncorrected image already matched the reference more closely.",
+    color_calibration_confidence: "Overall confidence score for ColorChecker-based calibration using the middle 24-patch Passport page. Low values suggest that scale or color correction should be inspected.",
+    delta_e_initial: "Average ColorChecker color error before correction. Smaller values mean the uncorrected image already matched the middle-page reference more closely.",
     delta_e_final: "Average ColorChecker color error after correction. Smaller values indicate a better final match to the reference patches.",
     trad_shape_index_i: "Tomato Analyzer (TA) fruit shape index I, calculated as maximum height divided by maximum width. Values above 1 are elongated and values below 1 are squat.",
     trad_shape_index_ii: "Tomato Analyzer (TA) fruit shape index II, calculated as mid-height divided by mid-width. It is a center-cross-section version of the height-to-width ratio.",
@@ -922,7 +1059,7 @@ const COLUMN_HELP_TEXT = {
     trad_heart: "Tomato Analyzer (TA) composite heart-shape score combining widest-point position, taperness, and proximal shoulder height. Larger values indicate a more heart-like outline by this descriptor.",
     trad_rectangularity: "Tomato Analyzer (TA) ratio of maximum inscribed rectangle area to minimum enclosing rectangle area. Values closer to 1 indicate a more rectangular fruit outline.",
     image_ocr_dbnet_base64: "Diagnostic OCR preview showing DBNet text boxes, candidate reads, confidences, and selected Line when OCR is requested. It helps diagnose Line detection errors.",
-    image_pre_calibration_base64: "Image before color calibration, with ColorChecker overlay when available. It is the first visual check for checker detection and scale calibration.",
+    image_pre_calibration_base64: "Image before color calibration, with ColorChecker overlay when available. Use it to verify the detected board is the middle 24-patch Passport page shown in Analysis Settings.",
     image_raw_base64: "Raw model-output preview retained for diagnosis. It shows the original predicted masks before cleanup is used for measurement.",
     image_cleanup_hybrid_base64: "Cleanup preview showing processed masks, raw mask outlines, axes, midline, and ColorChecker overlay. These cleaned masks feed the main measurements.",
     image_sm_base64: "Smoothed preview showing fitted fruit and flesh curves plus smoothed endpoint angle geometry. It helps verify the function-fit measurements.",
@@ -930,6 +1067,7 @@ const COLUMN_HELP_TEXT = {
     line: "Short Line ID detected from text in the image, optionally constrained by the Possible Lines list. It may contain letters, numbers, dashes, or underscores.",
     line_confidence: "Confidence score for the selected Line read or matched Line option. Lower values should be checked manually.",
     line_orientation: "Image rotation inferred from the selected OCR read and used for mask generation when text is detected. A value of 0 means no rotation was applied.",
+    qr_data: "Decoded QR code payload when a QR code is present in the image. QR boxes are also drawn on generated preview images.",
     processing_ms: "Cumulative backend processing time for the image in milliseconds, including any on-demand feature or preview processing added after the row first appears. Timeout rows are shown as greater than the configured timeout value."
 };
 
@@ -964,12 +1102,14 @@ let latestSinglePreviewIds = [];
 
 const ALWAYS_DEFAULT_COLUMN_IDS = ["processing_ms"];
 const OCR_COLUMN_IDS = ["line", "line_confidence", "line_orientation"];
+const QR_COLUMN_IDS = ["qr_data"];
 const RAW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_raw"));
 const SMOOTH_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_smoothed"));
 const TRADITIONAL_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("traditional"));
 const COLOR_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_color"));
 const PREVIEW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("previews_standard"));
 const OCR_STAGE_COLUMN_IDS = new Set([...OCR_COLUMN_IDS, "image_ocr_dbnet_base64", "image_line_ocr_base64"]);
+const QR_STAGE_COLUMN_IDS = new Set(QR_COLUMN_IDS);
 
 function columnIdsForGroup(groupId) {
     const group = COLUMN_GROUP_MAP.get(groupId);
@@ -1059,6 +1199,7 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
 
     const nextVisible = new Set();
     addColumnIds(nextVisible, ALWAYS_DEFAULT_COLUMN_IDS);
+    addColumnIds(nextVisible, QR_COLUMN_IDS);
 
     if (checkboxChecked("mode-all-features-input", false)) {
         addColumnIds(nextVisible, ALL_COLUMN_IDS);
@@ -1217,6 +1358,7 @@ function selectedColumnIdsForRequest() {
 
 function stageForColumnId(id) {
     if (OCR_STAGE_COLUMN_IDS.has(id)) return "ocr";
+    if (QR_STAGE_COLUMN_IDS.has(id)) return "qr";
     if (COLOR_STAGE_COLUMN_IDS.has(id) || id === "image_pre_calibration_base64") return "color";
     if (SMOOTH_STAGE_COLUMN_IDS.has(id) || id === "image_sm_base64") return "smoothing";
     if (TRADITIONAL_STAGE_COLUMN_IDS.has(id) || id === "image_traditional_base64") return "traditional";
@@ -1246,6 +1388,9 @@ function columnHasUsableValue(item, columnId) {
     const column = COLUMN_BY_ID.get(columnId);
     if (!column) return true;
     const value = columnValue(column, item);
+    if (columnId === "qr_data") {
+        return itemCompletedStages(item).has("qr") || !(value === null || value === undefined || value === "");
+    }
     return !(value === null || value === undefined || value === "");
 }
 
@@ -1695,23 +1840,79 @@ function renderCurrentSingleAnalysis() {
     resultDiv.innerHTML = `${notesHtml}${renderSinglePreviewCards(latestSingleData, previewIds)}`;
 }
 
+function setSingleProcessingState(isRunning) {
+    const processBtn = document.getElementById("process-single-btn");
+    const stopBtn = document.getElementById("stop-single-btn");
+    const fileInput = document.getElementById("single-file");
+    if (processBtn) processBtn.disabled = Boolean(isRunning);
+    if (fileInput) fileInput.disabled = Boolean(isRunning);
+    if (stopBtn) {
+        stopBtn.style.display = isRunning ? "inline-flex" : "none";
+        if (!isRunning) resetStopConfirmation(stopBtn);
+    }
+    if (isRunning) setProgressBar("single-progress", 0, { visible: true });
+}
+
+function updateSingleProgress(run) {
+    if (!run?.running || run.stopRequested) return;
+    const elapsed = Date.now() - run.progressStartedAt;
+    const fraction = Math.min(0.5, (elapsed / SINGLE_REQUEST_TIMEOUT_MS) * 0.5);
+    setProgressBar("single-progress", fraction, { visible: true });
+}
+
+function startSingleProgress(run) {
+    run.progressStartedAt = Date.now();
+    updateSingleProgress(run);
+    run.progressTimer = setInterval(() => updateSingleProgress(run), 250);
+}
+
+function finishSingleProgress(run, { stopped = false } = {}) {
+    if (run?.progressTimer) {
+        clearInterval(run.progressTimer);
+        run.progressTimer = null;
+    }
+    if (stopped) {
+        setProgressBar("single-progress", 0, { visible: false });
+    } else {
+        setProgressBar("single-progress", 1, { visible: true });
+    }
+}
+
+function stopActiveSingleRun() {
+    if (!activeSingleRun?.running) return;
+    activeSingleRun.stopRequested = true;
+    activeSingleRun.abortController?.abort();
+}
+
 document.getElementById("single-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const file = document.getElementById("single-file").files[0];
     const status = document.getElementById("single-status");
     const resultDiv = document.getElementById("single-result");
+    if (!file || activeSingleRun?.running) return;
 
-    if (!requireFruitSelection(status)) {
+    if (!requireWalkthroughComplete(status)) {
         resultDiv.innerHTML = "";
         return;
     }
 
+    const run = {
+        abortController: new AbortController(),
+        running: true,
+        stopRequested: false
+    };
+    activeSingleRun = run;
     status.innerText = "Processing...";
     resultDiv.innerHTML = "";
+    latestSingleData = null;
+    latestSinglePreviewIds = [];
+    setSingleProcessingState(true);
+    startSingleProgress(run);
 
     try {
         const requestedPreviewIds = selectedPreviewIds();
-        const data = await postImage(file, requestedPreviewIds, SINGLE_REQUEST_TIMEOUT_MS, 0, null, getAnalysisSettingsSnapshot());  // No retries for single images
+        const data = await postImage(file, requestedPreviewIds, SINGLE_REQUEST_TIMEOUT_MS, 0, run.abortController.signal, getAnalysisSettingsSnapshot());  // No retries for single images
+        if (run.stopRequested || activeSingleRun !== run) return;
         
         if (data.success) {
             status.innerText = "Success";
@@ -1739,14 +1940,31 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
             resultDiv.innerHTML = `${notesHtml}${renderSinglePreviewCards(data, requestedPreviewIds)}`;
         }
     } catch (err) {
+        if (run.stopRequested || err.message === "Batch stopped") {
+            status.innerText = "Single image processing stopped.";
+            return;
+        }
         latestSingleData = null;
         latestSinglePreviewIds = [];
         status.innerText = `API request failed: ${err.message}`;
+    } finally {
+        if (activeSingleRun === run) {
+            finishSingleProgress(run, { stopped: run.stopRequested });
+            activeSingleRun = null;
+            setSingleProcessingState(false);
+        }
     }
+});
+
+document.getElementById("stop-single-btn")?.addEventListener("click", (event) => {
+    if (!requireSecondStopClick(event.currentTarget)) return;
+    resetStopConfirmation(event.currentTarget);
+    stopActiveSingleRun();
 });
 
 let globalBatchResults = []; // Stores all row data for dynamic toggling
 let activeBatch = null;
+let activeSingleRun = null;
 let batchRunCounter = 0;
 const BATCH_PAUSE_MS = 50;
 const BATCH_WARMUP_COUNT = 2;
@@ -1760,6 +1978,7 @@ let histogramCharts = [];
 
 setupColumnControls();
 setupAnalysisSettingsControls();
+initSettingsWizard();
 setupBatchJumpControls();
 
 function formatDuration(ms) {
@@ -1768,6 +1987,45 @@ function formatDuration(ms) {
     const m = String(Math.floor((elapsedSec % 3600) / 60)).padStart(2, '0');
     const s = String(elapsedSec % 60).padStart(2, '0');
     return `${h}:${m}:${s}`;
+}
+
+function setProgressBar(progressId, fraction = 0, { visible = true, indeterminate = false } = {}) {
+    const wrap = document.getElementById(progressId);
+    if (!wrap) return;
+    const bar = wrap.querySelector(".progress-bar");
+    wrap.classList.toggle("visible", Boolean(visible));
+    wrap.setAttribute("aria-hidden", visible ? "false" : "true");
+    if (!bar) return;
+    bar.classList.toggle("indeterminate", Boolean(indeterminate));
+    if (indeterminate) {
+        bar.style.width = "";
+    } else {
+        const pct = Math.max(0, Math.min(100, Number(fraction || 0) * 100));
+        bar.style.width = `${pct}%`;
+    }
+}
+
+function resetStopConfirmation(button) {
+    if (!button) return;
+    if (button.stopConfirmTimer) {
+        clearTimeout(button.stopConfirmTimer);
+        button.stopConfirmTimer = null;
+    }
+    button.dataset.confirmingStop = "false";
+    button.classList.remove("confirming-stop");
+    if (button.dataset.stopBaseText) button.innerText = button.dataset.stopBaseText;
+}
+
+function requireSecondStopClick(button, confirmText = "Click again to stop") {
+    if (!button) return true;
+    if (button.dataset.confirmingStop === "true") return true;
+    button.dataset.stopBaseText = button.dataset.stopBaseText || button.innerText;
+    button.dataset.confirmingStop = "true";
+    button.classList.add("confirming-stop");
+    button.innerText = confirmText;
+    if (button.stopConfirmTimer) clearTimeout(button.stopConfirmTimer);
+    button.stopConfirmTimer = setTimeout(() => resetStopConfirmation(button), STOP_CONFIRM_MS);
+    return false;
 }
 
 function makeBatchState(files, settings, requestLineOcr) {
@@ -1841,6 +2099,23 @@ function updateBatchTimer(batch) {
     timerDiv.innerText = `Elapsed: ${formatDuration(elapsedMs)} | ETA: ${etaStr}`;
 }
 
+function updateBatchProgress(batch) {
+    if (!batch) {
+        setProgressBar("bulk-progress", 0, { visible: false });
+        return;
+    }
+
+    if (batch.onDemandRunning && batch.onDemandTotal > 0) {
+        setProgressBar("bulk-progress", batch.onDemandCompleted / batch.onDemandTotal, { visible: true });
+        return;
+    }
+
+    const total = Math.max(batch.files?.length || 0, 1);
+    const completed = batch.finished ? total : Math.min(batch.completed || 0, total);
+    const shouldShow = Boolean(batch.running || batch.completed > 0 || batch.finished);
+    setProgressBar("bulk-progress", completed / total, { visible: shouldShow });
+}
+
 function startOnDemandBatchTimer(batch, totalRows) {
     if (!batch || totalRows <= 0) return;
     batch.onDemandRunning = true;
@@ -1848,6 +2123,7 @@ function startOnDemandBatchTimer(batch, totalRows) {
     batch.onDemandTotal = totalRows;
     batch.onDemandCompleted = 0;
     updateBatchTimer(batch);
+    updateBatchProgress(batch);
     if (!batch.running) {
         if (batch.timerInterval) clearInterval(batch.timerInterval);
         batch.timerInterval = setInterval(() => {
@@ -1874,9 +2150,11 @@ function finishOnDemandBatchTimer(batch) {
         timerDiv.style.display = "block";
         timerDiv.innerText = `Total Time: ${formatDuration(batch.elapsedMs)}`;
     }
+    updateBatchProgress(batch);
 }
 
 function updateBatchControls(batch) {
+    const processBtn = document.getElementById("process-batch-btn");
     const stopBtn = document.getElementById("stop-batch-btn");
     const resumeBtn = document.getElementById("resume-batch-btn");
     const downloadBtn = document.getElementById("download-csv-btn");
@@ -1884,7 +2162,9 @@ function updateBatchControls(batch) {
 
     const ownsUi = isActiveBatch(batch);
     const busy = Boolean(batch.running || batch.onDemandRunning);
+    if (processBtn) processBtn.disabled = ownsUi && busy;
     stopBtn.style.display = ownsUi && busy ? "inline-flex" : "none";
+    if (!(ownsUi && busy)) resetStopConfirmation(stopBtn);
     resumeBtn.style.display = ownsUi && !busy && !batch.finished && batch.nextIndex < batch.files.length ? "inline-flex" : "none";
     downloadBtn.style.display = ownsUi && !busy && batch.successCount > 0 ? "inline-flex" : "none";
     updateAnalysisSettingsLock();
@@ -1902,6 +2182,8 @@ function updateAnalysisSettingsLock() {
     if (fieldset) fieldset.disabled = locked;
     if (fruitSelect) fruitSelect.disabled = locked;
     if (card) card.classList.toggle("settings-locked", locked);
+    document.querySelectorAll(".wizard-edit-btn").forEach(btn => { btn.disabled = locked; });
+    updateWizardNav();
     updateDependentSettingsAvailability();
 }
 
@@ -1932,9 +2214,11 @@ function stopActiveBatch(reason = "stopped") {
         batch.onDemandStartedAt = null;
         batch.onDemandAbortController = null;
         updateAnalysisSettingsLock();
+        updateBatchProgress(batch);
         return;
     }
     updateBatchControls(batch);
+    updateBatchProgress(batch);
 }
 
 function finishBatch(batch, mode) {
@@ -1984,6 +2268,7 @@ function finishBatch(batch, mode) {
     }
 
     updateBatchControls(batch);
+    updateBatchProgress(batch);
     requestHistogramRebuild(chartsContainer);
 }
 
@@ -2345,6 +2630,7 @@ async function runMissingStageRequest() {
             }
             batch.onDemandCompleted = Math.min(batch.onDemandTotal, batch.onDemandCompleted + chunk.length);
             updateBatchTimer(batch);
+            updateBatchProgress(batch);
             refreshBatchOutputs(document.getElementById("histograms-container"), { debounceHistograms: true });
         }
     } finally {
@@ -2756,6 +3042,7 @@ async function runBatch(batch) {
     batch.runStartedAt = Date.now();
     updateBatchTimer(batch);
     updateBatchControls(batch);
+    updateBatchProgress(batch);
 
     if (batch.timerInterval) clearInterval(batch.timerInterval);
     batch.timerInterval = setInterval(() => {
@@ -2825,6 +3112,7 @@ async function runBatch(batch) {
 
         batch.completed++;
         batch.nextIndex = index + 1;
+        updateBatchProgress(batch);
         refreshBatchOutputs(chartsContainer, { debounceHistograms: true });
 
         if (batch.nextIndex < batch.files.length) {
@@ -2846,7 +3134,7 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     const files = document.getElementById("bulk-files").files;
     if (!files || files.length === 0) return;
     const status = document.getElementById("bulk-status");
-    if (!requireFruitSelection(status)) return;
+    if (!requireWalkthroughComplete(status)) return;
 
     stopActiveBatch("replaced");
 
@@ -2865,6 +3153,7 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
         timerDiv.style.display = "block";
         timerDiv.innerText = "Elapsed: 00:00:00 | ETA: Calculating...";
     }
+    setProgressBar("bulk-progress", 0, { visible: true });
 
     globalBatchResults = [];
     renderBulkTable();
@@ -2873,6 +3162,9 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
 });
 
 document.getElementById("stop-batch-btn").addEventListener("click", () => {
+    const stopBtn = document.getElementById("stop-batch-btn");
+    if (!requireSecondStopClick(stopBtn)) return;
+    resetStopConfirmation(stopBtn);
     stopActiveBatch("stopped");
 });
 
