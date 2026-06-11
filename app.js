@@ -40,6 +40,10 @@ function clearSessionUrl() {
     return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_preview_session_clear" : "preview_session/clear"}`;
 }
 
+function compatibilityUrl() {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_compatibility" : "compatibility_check"}`;
+}
+
 function safeClientToken(value) {
     return String(value || "").replace(/[^0-9A-Za-z_.-]+/g, "_").slice(0, 64).replace(/^[_\-.]+|[_\-.]+$/g, "") || "row";
 }
@@ -534,8 +538,15 @@ function setupAnalysisSettingsControls() {
 }
 
 // --- ANALYSIS SETUP WALKTHROUGH (WIZARD) ---
-const WIZARD_TOTAL_STEPS = 6;
-const WIZARD_STEP_LABELS = ["Fruit", "Scale & Calibration", "On-screen Labels", "Features", "Manual Settings", "Review"];
+const WIZARD_SUMMARY_STEP = 6;
+const WIZARD_ALL_STEPS = [
+    { step: 1, label: "Fruit" },
+    { step: 2, label: "Scale & Calibration" },
+    { step: 3, label: "On-screen Labels" },
+    { step: 4, label: "Features" },
+    { step: 5, label: "Manual Settings", requiresLegacy: true },
+    { step: WIZARD_SUMMARY_STEP, label: "Review" }
+];
 let wizardStep = 1;
 let wizardCompleted = false;
 let wizardEditingFromSummary = false;
@@ -544,14 +555,54 @@ function wizardStepElements() {
     return [...document.querySelectorAll("#analysis-settings-card .wizard-step")];
 }
 
+function legacyFeaturesSelected() {
+    return checkboxChecked("mode-legacy-ta-input", false) || checkboxChecked("mode-all-features-input", false) || hasVisibleColumnInGroup("traditional");
+}
+
+function activeWizardSteps() {
+    return WIZARD_ALL_STEPS.filter(item => !item.requiresLegacy || legacyFeaturesSelected());
+}
+
+function activeWizardStepNumbers() {
+    return activeWizardSteps().map(item => item.step);
+}
+
+function coerceWizardStep(step, direction = 1) {
+    const steps = activeWizardStepNumbers();
+    const requested = Number(step) || 1;
+    if (steps.includes(requested)) return requested;
+    if (direction < 0) {
+        return [...steps].reverse().find(candidate => candidate < requested) || steps[0];
+    }
+    return steps.find(candidate => candidate > requested) || steps[steps.length - 1];
+}
+
+function nextWizardStep(current) {
+    const steps = activeWizardStepNumbers();
+    const idx = steps.indexOf(current);
+    return idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : steps[steps.length - 1];
+}
+
+function previousWizardStep(current) {
+    const steps = activeWizardStepNumbers();
+    const idx = steps.indexOf(current);
+    return idx > 0 ? steps[idx - 1] : steps[0];
+}
+
+function finalWizardInputStep() {
+    const steps = activeWizardStepNumbers();
+    return steps[Math.max(0, steps.length - 2)];
+}
+
 function renderWizardIndicator() {
     const indicator = document.getElementById("wizard-step-indicator");
     if (!indicator) return;
-    indicator.innerHTML = WIZARD_STEP_LABELS.map((label, idx) => {
-        const step = idx + 1;
+    const steps = activeWizardSteps();
+    indicator.innerHTML = steps.map((item, idx) => {
+        const step = item.step;
         const done = step !== wizardStep && (wizardCompleted || step < wizardStep);
         const state = step === wizardStep ? "current" : (done ? "done" : "");
-        return `<span class="wizard-indicator-item ${state}"><span class="wizard-dot">${done ? "&#10003;" : step}</span>${escapeHtml(label)}</span>`;
+        return `<span class="wizard-indicator-item ${state}"><span class="wizard-dot">${done ? "&#10003;" : idx + 1}</span>${escapeHtml(item.label)}</span>`;
     }).join("");
 }
 
@@ -560,21 +611,34 @@ function updateWizardNav() {
     const backBtn = document.getElementById("wizard-back-btn");
     const nextBtn = document.getElementById("wizard-next-btn");
     if (!nav || !backBtn || !nextBtn) return;
-    const onSummary = wizardStep === WIZARD_TOTAL_STEPS;
+    const onSummary = wizardStep === WIZARD_SUMMARY_STEP;
     nav.style.display = onSummary ? "none" : "flex";
     backBtn.style.visibility = (wizardStep === 1 || wizardEditingFromSummary) ? "hidden" : "visible";
-    nextBtn.innerText = wizardEditingFromSummary ? "Done" : (wizardStep === WIZARD_TOTAL_STEPS - 1 ? "Finish" : "Next");
+    nextBtn.innerText = wizardEditingFromSummary ? "Done" : (wizardStep === finalWizardInputStep() ? "Finish" : "Next");
     const locked = isAnalysisSettingsLocked();
     backBtn.disabled = locked;
     nextBtn.disabled = locked;
 }
 
 function showWizardStep(step, { fromEdit = false } = {}) {
-    wizardStep = Math.min(Math.max(Number(step) || 1, 1), WIZARD_TOTAL_STEPS);
-    wizardEditingFromSummary = fromEdit && wizardStep !== WIZARD_TOTAL_STEPS;
+    wizardStep = coerceWizardStep(step, Number(step) < wizardStep ? -1 : 1);
+    wizardEditingFromSummary = fromEdit && wizardStep !== WIZARD_SUMMARY_STEP;
     wizardStepElements().forEach(el => el.classList.toggle("active", Number(el.dataset.step) === wizardStep));
-    if (wizardStep === WIZARD_TOTAL_STEPS) {
+    if (wizardStep === WIZARD_SUMMARY_STEP) {
         wizardCompleted = true;
+        renderWizardSummary();
+    }
+    renderWizardIndicator();
+    updateWizardNav();
+}
+
+function refreshWizardForSettings() {
+    const steps = activeWizardStepNumbers();
+    if (!steps.includes(wizardStep)) {
+        showWizardStep(coerceWizardStep(wizardStep));
+        return;
+    }
+    if (wizardStep === WIZARD_SUMMARY_STEP) {
         renderWizardSummary();
     }
     renderWizardIndicator();
@@ -593,15 +657,15 @@ function validateWizardStep(step) {
 
 function wizardNext() {
     if (!validateWizardStep(wizardStep)) return;
-    if (wizardEditingFromSummary || wizardStep >= WIZARD_TOTAL_STEPS - 1) {
-        showWizardStep(WIZARD_TOTAL_STEPS);
+    if (wizardEditingFromSummary || wizardStep === finalWizardInputStep()) {
+        showWizardStep(WIZARD_SUMMARY_STEP);
         return;
     }
-    showWizardStep(wizardStep + 1);
+    showWizardStep(nextWizardStep(wizardStep));
 }
 
 function wizardBack() {
-    if (wizardStep > 1) showWizardStep(wizardStep - 1);
+    if (wizardStep > 1) showWizardStep(previousWizardStep(wizardStep));
 }
 
 function wizardSummaryRows() {
@@ -611,10 +675,10 @@ function wizardSummaryRows() {
         ? (fruitSelect.selectedOptions?.[0]?.text || fruitSelect.value)
         : "Not selected";
 
-    const scaleBits = [settings.useColorChecker ? "ColorChecker present (color + scale)" : "No ColorChecker"];
-    scaleBits.push(settings.scaleValue
-        ? `Manual scale: ${settings.scaleValue} ${settings.scaleUnit === "px_per_cm" ? "pixels/cm" : "cm/pixel"}`
-        : "No manual scale fallback");
+    const scaleBits = [settings.scaleValue
+        ? `Manual scale override: ${settings.scaleValue} ${settings.scaleUnit === "px_per_cm" ? "pixels/cm" : "cm/pixel"}`
+        : "No manual scale override"];
+    scaleBits.push(settings.useColorChecker ? "ColorChecker present (color + scale)" : "No ColorChecker");
 
     const labelBits = [settings.readLabels ? "Read on-screen labels" : "No on-screen label reading"];
     if (settings.readLabels) {
@@ -632,18 +696,21 @@ function wizardSummaryRows() {
         if (checkboxChecked("mode-visual-comparison-input", false)) featureNames.push("Visual comparison");
     }
 
-    const trad = settings.traditionalSettings || {};
-    const tradValue = checkboxChecked("mode-legacy-ta-input", false) || hasVisibleColumnInGroup("traditional")
-        ? `Proximal ${trad.proximal_width_percent}% / Distal ${trad.distal_width_percent}% / Angle span ${trad.angle_sample_percent}% / Indent band ${trad.end_indentation_percent}%`
-        : "Not used (Legacy Features (TA) not selected)";
-
-    return [
+    const rows = [
         { step: 1, label: "Fruit", value: fruitText || "Not selected" },
         { step: 2, label: "Scale & calibration", value: scaleBits.join(" - ") },
         { step: 3, label: "On-screen labels", value: labelBits.join(" - ") },
-        { step: 4, label: "Features", value: featureNames.join(", ") || "None selected" },
-        { step: 5, label: "Manual settings", value: tradValue }
+        { step: 4, label: "Features", value: featureNames.join(", ") || "None selected" }
     ];
+    if (legacyFeaturesSelected()) {
+        const trad = settings.traditionalSettings || {};
+        rows.push({
+            step: 5,
+            label: "Manual settings",
+            value: `Proximal ${trad.proximal_width_percent}% / Distal ${trad.distal_width_percent}% / Angle span ${trad.angle_sample_percent}% / Indent band ${trad.end_indentation_percent}%`
+        });
+    }
+    return rows;
 }
 
 function renderWizardSummary() {
@@ -655,6 +722,93 @@ function renderWizardSummary() {
             <span class="wizard-summary-value">${escapeHtml(row.value)}</span>
             <button type="button" class="wizard-edit-btn" data-step="${row.step}">Edit</button>
         </div>`).join("");
+}
+
+// --- DATA COMPATIBILITY CHECK (advisory OOD check against the active model) ---
+const COMPAT_MAX_FILES = 5;
+const COMPAT_VERDICT_LABELS = {
+    compatible: "Compatible",
+    borderline: "Borderline",
+    incompatible: "Incompatible"
+};
+
+function renderCompatibilityResults(data) {
+    const summaryEl = document.getElementById("compat-summary");
+    const resultsEl = document.getElementById("compat-results");
+    if (!summaryEl || !resultsEl) return;
+
+    const rows = (data.results || []).map(item => {
+        if (!item.success) {
+            return `<div class="compat-result-row">
+                <span class="compat-result-name">${escapeHtml(item.filename || "image")}</span>
+                <span class="compat-result-distance">${escapeHtml(item.message || "Failed")}</span>
+                <span class="compat-badge error">Error</span>
+            </div>`;
+        }
+        const verdict = item.verdict || "error";
+        return `<div class="compat-result-row">
+            <span class="compat-result-name">${escapeHtml(item.filename || "image")}</span>
+            <span class="compat-result-distance">distance ${Number(item.distance).toFixed(3)}</span>
+            <span class="compat-badge ${escapeHtml(verdict)}">${escapeHtml(COMPAT_VERDICT_LABELS[verdict] || verdict)}</span>
+        </div>`;
+    });
+    resultsEl.innerHTML = rows.join("");
+
+    const verdicts = (data.results || []).filter(item => item.success).map(item => item.verdict);
+    summaryEl.classList.remove("ok", "warn", "bad");
+    if (!verdicts.length) {
+        summaryEl.innerText = "No images could be checked.";
+        summaryEl.classList.add("warn");
+    } else if (verdicts.includes("incompatible")) {
+        summaryEl.innerText = "Some images look very different from this model's training data. Results may be unreliable, but you can still proceed.";
+        summaryEl.classList.add("bad");
+    } else if (verdicts.includes("borderline")) {
+        summaryEl.innerText = "Some images look a little unusual compared to this model's training data. Results are likely fine, but review them carefully.";
+        summaryEl.classList.add("warn");
+    } else {
+        summaryEl.innerText = "Your images look compatible with this model's training data.";
+        summaryEl.classList.add("ok");
+    }
+    summaryEl.classList.add("visible");
+}
+
+function setupCompatibilityCheck() {
+    const button = document.getElementById("compat-check-btn");
+    const input = document.getElementById("compat-files");
+    const status = document.getElementById("compat-status");
+    const summaryEl = document.getElementById("compat-summary");
+    const resultsEl = document.getElementById("compat-results");
+    if (!button || !input) return;
+
+    button.addEventListener("click", async () => {
+        const files = [...(input.files || [])].slice(0, COMPAT_MAX_FILES);
+        if (!files.length) {
+            if (status) status.innerText = "Choose 1-5 sample images first.";
+            return;
+        }
+
+        button.disabled = true;
+        if (status) status.innerText = `Checking ${files.length} image${files.length === 1 ? "" : "s"}...`;
+        if (resultsEl) resultsEl.innerHTML = "";
+        summaryEl?.classList.remove("visible");
+
+        try {
+            const formData = new FormData();
+            files.forEach(file => formData.append("files", file));
+            formData.append("password", currentPassword);
+            formData.append("username", currentUsername);
+            const response = await fetch(compatibilityUrl(), { method: "POST", body: formData });
+            if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+            const data = await response.json();
+            if (!data.success) throw new Error(data.message || "Compatibility check failed.");
+            renderCompatibilityResults(data);
+            if (status) status.innerText = "";
+        } catch (err) {
+            if (status) status.innerText = `Compatibility check failed: ${err.message}`;
+        } finally {
+            button.disabled = isAnalysisSettingsLocked();
+        }
+    });
 }
 
 function initSettingsWizard() {
@@ -1157,6 +1311,13 @@ function setCheckboxVisualState(id, state) {
     input.indeterminate = Boolean(state.partial);
 }
 
+function setBinaryCheckboxVisualState(id, checked) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.checked = Boolean(checked);
+    input.indeterminate = false;
+}
+
 function setAllFeaturesVisualState() {
     const input = document.getElementById("mode-all-features-input");
     if (!input) return;
@@ -1170,8 +1331,8 @@ function syncAnalysisModeCheckboxesFromColumns() {
     setCheckboxVisualState("mode-smoothing-input", columnSelectionState(columnIdsForGroup("experimental_smoothed")));
     setCheckboxVisualState("mode-legacy-ta-input", columnSelectionState(columnIdsForGroup("traditional")));
     setCheckboxVisualState("mode-visual-comparison-input", columnSelectionState(columnIdsForGroup("previews_standard")));
-    setCheckboxVisualState("read-labels-input", columnSelectionState([...OCR_STAGE_COLUMN_IDS]));
-    setCheckboxVisualState("use-color-checker-input", columnSelectionState([...COLOR_STAGE_COLUMN_IDS, "image_pre_calibration_base64"]));
+    setBinaryCheckboxVisualState("read-labels-input", columnSelectionState([...OCR_STAGE_COLUMN_IDS]).any);
+    setBinaryCheckboxVisualState("use-color-checker-input", columnSelectionState([...COLOR_STAGE_COLUMN_IDS, "image_pre_calibration_base64"]).any);
     setAllFeaturesVisualState();
 }
 
@@ -1239,6 +1400,7 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
     visibleColumnIds = nextVisible;
     updateColumnPickerChecks();
     updateDependentSettingsAvailability();
+    refreshWizardForSettings();
     if (sync) syncVisibleOutputs();
 }
 
@@ -1733,6 +1895,7 @@ function setupColumnControls() {
         if (allFeatures) allFeatures.checked = false;
         updateColumnPickerChecks();
         updateDependentSettingsAvailability();
+        refreshWizardForSettings();
         syncVisibleOutputs();
     };
 
@@ -1979,6 +2142,7 @@ let histogramCharts = [];
 setupColumnControls();
 setupAnalysisSettingsControls();
 initSettingsWizard();
+setupCompatibilityCheck();
 setupBatchJumpControls();
 
 function formatDuration(ms) {

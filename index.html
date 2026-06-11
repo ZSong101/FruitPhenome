@@ -171,6 +171,25 @@
     .wizard-summary-value { flex: 1; color: #38454f; line-height: 1.4; }
     .wizard-edit-btn { margin-left: auto; flex: 0 0 auto; background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding: 5px 14px; font-weight: 700; cursor: pointer; }
     .wizard-edit-btn:hover:not(:disabled) { background: #e1e6eb; }
+    .compat-check-block { margin-top: 20px; padding: 14px; border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; }
+    .compat-check-title { margin: 0 0 8px; }
+    .compat-check-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+    #compat-check-btn { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding: 10px 15px; font-weight: 700; cursor: pointer; min-height: 40px; }
+    #compat-check-btn:hover:not(:disabled) { background: #e1e6eb; }
+    .compat-summary { display: none; margin: 12px 0 8px; font-weight: 700; line-height: 1.4; }
+    .compat-summary.visible { display: block; }
+    .compat-summary.ok { color: #2c6e49; }
+    .compat-summary.warn { color: #8a6500; }
+    .compat-summary.bad { color: #a31912; }
+    .compat-results { display: grid; gap: 6px; }
+    .compat-result-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid #d8e1e8; border-radius: 6px; background: #fff; font-size: 14px; }
+    .compat-result-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .compat-result-distance { color: #7890a3; font-variant-numeric: tabular-nums; }
+    .compat-badge { flex: 0 0 auto; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+    .compat-badge.compatible { background: #d2ead9; color: #2c6e49; }
+    .compat-badge.borderline { background: #fff3cd; color: #8a6500; }
+    .compat-badge.incompatible { background: #ffe2e0; color: #a31912; }
+    .compat-badge.error { background: #e3eaf0; color: #4a5963; }
     @media (max-width: 760px) {
       .wizard-summary-row { flex-wrap: wrap; }
       .wizard-summary-label { min-width: 0; width: 100%; }
@@ -250,38 +269,42 @@
       <fieldset id="analysis-settings-fieldset" class="settings-fieldset">
         <div class="wizard-step" data-step="2">
           <h3 class="wizard-step-title">Step 2: Scale and color calibration</h3>
+          <div class="aruco-pdf-tools">
+            <button type="button" id="download-aruco-pdf-btn">Download ArUco Print Sheet</button>
+            <span class="column-help-icon rich-help" tabindex="0">?
+              <span class="help-popover">Print this sheet when you want a simple size reference in your images. Choose the marker size that fits your fruit, print it at the indicated physical size, cut it out if needed, and keep one marker flat and fully visible in each image. If a marker is detected, it can be used for automatic scale calibration.</span>
+            </span>
+            <span id="aruco-pdf-status" class="muted" role="status"></span>
+          </div>
+          <p class="muted">Use an ArUco marker when you want automatic size calibration without entering a manual pixel-to-cm conversion. It is optional, but helpful when a known physical scale is needed.</p>
           <div class="settings-checks">
             <label class="settings-check" for="use-color-checker-input">
               <input type="checkbox" id="use-color-checker-input" checked>
               <span>Calibrite ColorChecker Passport Photo 2 present
                 <span class="column-help-icon rich-help" tabindex="0">?
-                  <span class="help-popover">The ColorChecker is used for color correction and automatic cm/pixel scale calibration. Use the middle Passport page, the 24-patch target that looks like the reference image shown below. Product reference: <a href="https://calibrite.com/us/product/colorchecker-passport-photo-2/" target="_blank" rel="noopener noreferrer">Calibrite ColorChecker Passport Photo 2</a>.</span>
+                  <span class="help-popover">The ColorChecker is not required, but it is useful for color calibration and can also provide automatic cm/pixel scale calibration. Use the middle Passport page, the 24-patch target that looks like the reference image shown below. Product reference: <a href="https://calibrite.com/us/product/colorchecker-passport-photo-2/" target="_blank" rel="noopener noreferrer">Calibrite ColorChecker Passport Photo 2</a>.</span>
                 </span>
               </span>
             </label>
           </div>
           <div class="colorchecker-reference">
             <img src="reference.png" alt="Reference ColorChecker target: use the middle Passport page">
-            <p><strong>ColorChecker reference:</strong> use the middle page of the Calibrite ColorChecker Passport Photo 2, the 24-patch page that looks like this reference image.</p>
-          </div>
-          <div class="aruco-pdf-tools">
-            <button type="button" id="download-aruco-pdf-btn">Download ArUco Print Sheet</button>
-            <span id="aruco-pdf-status" class="muted" role="status"></span>
+            <p><strong>ColorChecker reference:</strong> the ColorChecker is not necessary, but it is helpful for color calibration. Use the middle page of the <a href="https://calibrite.com/us/product/colorchecker-passport-photo-2/" target="_blank" rel="noopener noreferrer">Calibrite ColorChecker Passport Photo 2</a>, the 24-patch page that looks like this reference image.</p>
           </div>
           <div class="scale-row">
             <div>
-              <label for="scale-value-input" class="setting-label">Manual Scale <span class="column-help-icon" title="Optional physical scale fallback. The backend first tries an ArUco marker, then the ColorChecker, then this user-defined conversion; if none are available, spatial outputs use pixels.">?</span></label>
+              <label for="scale-value-input" class="setting-label">Manual Scale <span class="column-help-icon" title="Optional physical scale override. When entered, this user-defined conversion is used before ArUco or ColorChecker scale estimates. If left blank, the backend tries ArUco, then ColorChecker, then reports pixel units if no scale is found.">?</span></label>
               <input type="number" id="scale-value-input" min="0" step="any" placeholder="Optional">
             </div>
             <div>
-              <label for="scale-unit-select" class="setting-label">Scale Unit <span class="column-help-icon" title="Choose whether the manual scale fallback is centimeters per pixel or pixels per centimeter. Leave Manual Scale blank to allow pixel-unit fallback when no ArUco marker or ColorChecker scale is found.">?</span></label>
+              <label for="scale-unit-select" class="setting-label">Scale Unit <span class="column-help-icon" title="Choose whether the manual scale override is centimeters per pixel or pixels per centimeter. Leave Manual Scale blank to use automatic ArUco or ColorChecker scale detection.">?</span></label>
               <select id="scale-unit-select">
                 <option value="cm_per_px">cm/pixel</option>
                 <option value="px_per_cm">pixels/cm</option>
               </select>
             </div>
           </div>
-          <p class="muted">Scale priority: ArUco marker, then ColorChecker, then manual scale, then pixel units.</p>
+          <p class="muted">Scale priority: manual scale, then ArUco marker, then ColorChecker, then pixel units.</p>
         </div>
 
         <div class="wizard-step" data-step="3">
@@ -391,6 +414,19 @@
                 <div id="main-column-menu"></div>
               </div>
             </div>
+          </div>
+          <div id="compat-check-block" class="compat-check-block">
+            <h3 class="compat-check-title">Data compatibility check (optional)</h3>
+            <p class="muted">Upload 2&ndash;5 sample images from your dataset to see how similar they look to the data this model was trained on. This check is advisory only and never blocks processing.</p>
+            <form id="compat-form" class="file-form">
+              <input type="file" id="compat-files" multiple accept=".jpg,.jpeg,.png">
+            </form>
+            <div class="compat-check-actions">
+              <button type="button" id="compat-check-btn">Check compatibility</button>
+              <span id="compat-status" class="muted" role="status"></span>
+            </div>
+            <p id="compat-summary" class="compat-summary"></p>
+            <div id="compat-results" class="compat-results"></div>
           </div>
         </div>
       </fieldset>
