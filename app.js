@@ -547,9 +547,11 @@ const WIZARD_ALL_STEPS = [
     { step: 5, label: "Manual Settings", requiresLegacy: true },
     { step: WIZARD_SUMMARY_STEP, label: "Review" }
 ];
+const WIZARD_MANUAL_SETTINGS_STEP = WIZARD_ALL_STEPS.find(item => item.requiresLegacy).step;
 let wizardStep = 1;
 let wizardCompleted = false;
 let wizardEditingFromSummary = false;
+let wizardEditManualWasVisible = true;
 
 function wizardStepElements() {
     return [...document.querySelectorAll("#analysis-settings-card .wizard-step")];
@@ -657,7 +659,20 @@ function validateWizardStep(step) {
 
 function wizardNext() {
     if (!validateWizardStep(wizardStep)) return;
-    if (wizardEditingFromSummary || wizardStep === finalWizardInputStep()) {
+    if (wizardEditingFromSummary) {
+        // If this edit just revealed the Manual Settings step (e.g. Legacy
+        // Features were checked while editing Features), visit it before
+        // returning to the summary.
+        const manualNowVisible = activeWizardStepNumbers().includes(WIZARD_MANUAL_SETTINGS_STEP);
+        if (manualNowVisible && !wizardEditManualWasVisible && wizardStep !== WIZARD_MANUAL_SETTINGS_STEP) {
+            wizardEditManualWasVisible = true;
+            showWizardStep(WIZARD_MANUAL_SETTINGS_STEP, { fromEdit: true });
+            return;
+        }
+        showWizardStep(WIZARD_SUMMARY_STEP);
+        return;
+    }
+    if (wizardStep === finalWizardInputStep()) {
         showWizardStep(WIZARD_SUMMARY_STEP);
         return;
     }
@@ -817,6 +832,7 @@ function initSettingsWizard() {
     document.getElementById("wizard-summary")?.addEventListener("click", (event) => {
         const editBtn = event.target.closest?.(".wizard-edit-btn");
         if (!editBtn || isAnalysisSettingsLocked()) return;
+        wizardEditManualWasVisible = activeWizardStepNumbers().includes(WIZARD_MANUAL_SETTINGS_STEP);
         showWizardStep(Number(editBtn.dataset.step), { fromEdit: true });
     });
     showWizardStep(1);
