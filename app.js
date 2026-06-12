@@ -206,8 +206,8 @@ function drawPdfScissorsIcon(pdf, x, y, scale = 1) {
     pdf.setDrawColor(120, 130, 138);
     pdf.setFillColor(255, 255, 255);
     pdf.setLineWidth(0.2);
-    pdf.circle(x, y, 0.62 * s, "S");
-    pdf.circle(x + 1.35 * s, y, 0.62 * s, "S");
+    pdf.circle(x, y - 1.35 * s, 0.62 * s, "S");
+    pdf.circle(x, y + 1.35 * s, 0.62 * s, "S");
     pdf.line(x + 0.72 * s, y - 0.18 * s, x + 3.1 * s, y - 1.7 * s);
     pdf.line(x + 0.72 * s, y + 0.18 * s, x + 3.1 * s, y + 1.7 * s);
     pdf.line(x + 2.9 * s, y - 1.7 * s, x + 3.55 * s, y - 2.05 * s);
