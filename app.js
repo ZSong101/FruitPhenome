@@ -5,9 +5,7 @@ let API_URL = "https://PPAL-SongLab-UGA-watermelon-proxy.hf.space/proxy_process"
 
 const SINGLE_REQUEST_TIMEOUT_MS = 60000; // 1 minute
 const BULK_REQUEST_TIMEOUT_MS = 40000;
-const BULK_HARD_REQUEST_TIMEOUT_MS = 125000;
 const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
-const BULK_HARD_TIMEOUT_MESSAGE = "No response after 125 seconds. Moving on.";
 const BULK_RETRY_MESSAGE = "Taking longer than 40 seconds. Trying again...";
 const BULK_SERVER_RETRY_MESSAGE = "Server unavailable or warming up. Trying again...";
 const STOP_CONFIRM_MS = 3500;
@@ -203,17 +201,34 @@ function drawPdfDimensionGuide(pdf, x, y, sizeMm, label) {
     pdf.text(`${label}: ${sizeMm} mm x ${sizeMm} mm`, x + sizeMm / 2, guideY + 5.2, { align: "center" });
 }
 
+function drawPdfScissorsIcon(pdf, x, y, scale = 1) {
+    const s = scale;
+    pdf.setDrawColor(120, 130, 138);
+    pdf.setFillColor(255, 255, 255);
+    pdf.setLineWidth(0.2);
+    pdf.circle(x, y, 0.62 * s, "S");
+    pdf.circle(x + 1.35 * s, y, 0.62 * s, "S");
+    pdf.line(x + 0.72 * s, y - 0.18 * s, x + 3.1 * s, y - 1.7 * s);
+    pdf.line(x + 0.72 * s, y + 0.18 * s, x + 3.1 * s, y + 1.7 * s);
+    pdf.line(x + 2.9 * s, y - 1.7 * s, x + 3.55 * s, y - 2.05 * s);
+    pdf.line(x + 2.9 * s, y + 1.7 * s, x + 3.55 * s, y + 2.05 * s);
+}
+
 function drawPdfMarker(pdf, marker, dataUrl, x, y) {
     const cutPaddingMm = 3;
+    const cutX = x - cutPaddingMm;
+    const cutY = y - cutPaddingMm;
+    const cutSize = marker.sizeMm + cutPaddingMm * 2;
     if (typeof pdf.setLineDashPattern === "function") {
         pdf.setLineDashPattern([1.5, 1.2], 0);
     }
     pdf.setDrawColor(120, 130, 138);
     pdf.setLineWidth(0.22);
-    pdf.rect(x - cutPaddingMm, y - cutPaddingMm, marker.sizeMm + cutPaddingMm * 2, marker.sizeMm + cutPaddingMm * 2);
+    pdf.rect(cutX, cutY, cutSize, cutSize);
     if (typeof pdf.setLineDashPattern === "function") {
         pdf.setLineDashPattern([], 0);
     }
+    drawPdfScissorsIcon(pdf, cutX + 1.6, cutY - 1.7, 0.85);
     pdf.addImage(dataUrl, "PNG", x, y, marker.sizeMm, marker.sizeMm);
     pdf.setDrawColor(30, 42, 50);
     pdf.setLineWidth(0.25);
@@ -957,7 +972,7 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
             // If we are out of retries, throw the error
             if (attempt === maxRetries) {
                 if (isTimeout) {
-                    const timeoutError = new Error(timeoutMs === BULK_HARD_REQUEST_TIMEOUT_MS ? BULK_HARD_TIMEOUT_MESSAGE : (timeoutMs === BULK_REQUEST_TIMEOUT_MS ? BULK_TIMEOUT_MESSAGE : `Timed out after ${Math.round(timeoutMs / 1000)}s`));
+                    const timeoutError = new Error(timeoutMs === BULK_REQUEST_TIMEOUT_MS ? BULK_TIMEOUT_MESSAGE : `Timed out after ${Math.round(timeoutMs / 1000)}s`);
                     timeoutError.timedOut = true;
                     throw timeoutError;
                 }
@@ -975,13 +990,11 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
 }
 
 async function postBulkImage(file, previewIds, externalSignal = null, settings = null, includeLineOcr = null, rowId = null, requestedColumnIdsOverride = null) {
-    // Keep the actual request alive longer than the proxy timeout to avoid orphaned
-    // backend jobs. The batch loop separately shows a 40s soft warning.
-    return postImage(file, previewIds, BULK_HARD_REQUEST_TIMEOUT_MS, 0, externalSignal, settings, includeLineOcr, rowId, requestedColumnIdsOverride);
+    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, settings, includeLineOcr, rowId, requestedColumnIdsOverride);
 }
 
 function isBulkTimeoutError(err) {
-    return Boolean(err?.timedOut) || err?.message === BULK_TIMEOUT_MESSAGE || err?.message === BULK_HARD_TIMEOUT_MESSAGE;
+    return Boolean(err?.timedOut) || err?.message === BULK_TIMEOUT_MESSAGE;
 }
 
 function isBulkRetryableError(err) {
