@@ -5,7 +5,9 @@ let API_URL = "https://PPAL-SongLab-UGA-watermelon-proxy.hf.space/proxy_process"
 
 const SINGLE_REQUEST_TIMEOUT_MS = 60000; // 1 minute
 const BULK_REQUEST_TIMEOUT_MS = 40000;
+const BULK_HARD_REQUEST_TIMEOUT_MS = 125000;
 const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
+const BULK_HARD_TIMEOUT_MESSAGE = "No response after 125 seconds. Moving on.";
 const BULK_RETRY_MESSAGE = "Taking longer than 40 seconds. Trying again...";
 const BULK_SERVER_RETRY_MESSAGE = "Server unavailable or warming up. Trying again...";
 const STOP_CONFIRM_MS = 3500;
@@ -43,6 +45,14 @@ function clearSessionUrl() {
 
 function compatibilityUrl() {
     return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_compatibility" : "compatibility_check"}`;
+}
+
+function flushQueueUrl() {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_flush_queue" : "flush_queue"}`;
+}
+
+function isDevUser() {
+    return currentUsername.trim().toLowerCase() === "devtest";
 }
 
 function safeClientToken(value) {
@@ -331,6 +341,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
         console.log(`Logged in as ${currentUsername}. Sending traffic via Proxy.`);
         document.getElementById("login-view").style.display = "none";
         document.getElementById("app-view").style.display = "block";
+        updateDevQueueToolsVisibility();
 
         // Track unique login name
         if (typeof gtag === 'function') {
@@ -946,7 +957,9 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
             // If we are out of retries, throw the error
             if (attempt === maxRetries) {
                 if (isTimeout) {
-                    throw new Error(timeoutMs === BULK_REQUEST_TIMEOUT_MS ? BULK_TIMEOUT_MESSAGE : `Timed out after ${Math.round(timeoutMs / 1000)}s`);
+                    const timeoutError = new Error(timeoutMs === BULK_HARD_REQUEST_TIMEOUT_MS ? BULK_HARD_TIMEOUT_MESSAGE : (timeoutMs === BULK_REQUEST_TIMEOUT_MS ? BULK_TIMEOUT_MESSAGE : `Timed out after ${Math.round(timeoutMs / 1000)}s`));
+                    timeoutError.timedOut = true;
+                    throw timeoutError;
                 }
                 throw err;
             }
@@ -962,12 +975,13 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
 }
 
 async function postBulkImage(file, previewIds, externalSignal = null, settings = null, includeLineOcr = null, rowId = null, requestedColumnIdsOverride = null) {
-    // 40 second timeout. The batch loop owns the one visible retry pass.
-    return postImage(file, previewIds, BULK_REQUEST_TIMEOUT_MS, 0, externalSignal, settings, includeLineOcr, rowId, requestedColumnIdsOverride);
+    // Keep the actual request alive longer than the proxy timeout to avoid orphaned
+    // backend jobs. The batch loop separately shows a 40s soft warning.
+    return postImage(file, previewIds, BULK_HARD_REQUEST_TIMEOUT_MS, 0, externalSignal, settings, includeLineOcr, rowId, requestedColumnIdsOverride);
 }
 
 function isBulkTimeoutError(err) {
-    return err?.message === BULK_TIMEOUT_MESSAGE;
+    return Boolean(err?.timedOut) || err?.message === BULK_TIMEOUT_MESSAGE || err?.message === BULK_HARD_TIMEOUT_MESSAGE;
 }
 
 function isBulkRetryableError(err) {
@@ -2221,6 +2235,7 @@ setupAnalysisSettingsControls();
 initSettingsWizard();
 setupCompatibilityCheck();
 setupBatchJumpControls();
+updateDevQueueToolsVisibility();
 
 function formatDuration(ms) {
     const elapsedSec = Math.floor(ms / 1000);
@@ -2462,6 +2477,45 @@ function stopActiveBatch(reason = "stopped") {
     updateBatchProgress(batch);
 }
 
+function updateDevQueueToolsVisibility() {
+    const tools = document.getElementById("dev-queue-tools");
+    if (!tools) return;
+    tools.classList.toggle("visible", isDevUser());
+}
+
+async function flushDevQueue() {
+    const button = document.getElementById("flush-dev-queue-btn");
+    const status = document.getElementById("flush-dev-queue-status");
+    if (!isDevUser()) {
+        if (status) status.innerText = "Only devtest can flush the dev queue.";
+        return;
+    }
+    if (button && !requireSecondStopClick(button, "Click again to flush")) return;
+    if (button) {
+        resetStopConfirmation(button);
+        button.disabled = true;
+    }
+    if (status) status.innerText = "Flushing dev queue...";
+    stopActiveBatch("replaced");
+    try {
+        const response = await fetch(flushQueueUrl(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: currentPassword, username: currentUsername })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.success === false) {
+            throw new Error(data.message || `HTTP ${response.status}`);
+        }
+        if (status) status.innerText = data.message || "Dev queue flush requested.";
+        startQueuePolling();
+    } catch (err) {
+        if (status) status.innerText = `Flush failed: ${err.message}`;
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 function finishBatch(batch, mode) {
     if (!isActiveBatch(batch)) return;
 
@@ -2532,6 +2586,9 @@ function setBatchResultItem(item, replaceIndex = null) {
 function addBatchResult(batch, file, data, replaceIndex = null) {
     if (data.success) {
         batch.successCount++;
+        if (Number(data.processing_ms) > BULK_REQUEST_TIMEOUT_MS) {
+            data.processing_ms_timeout = true;
+        }
         const item = batchResultItem(file, data);
         if (!item.isCm) batch.pixelScaleCount++;
 
@@ -3230,6 +3287,13 @@ function scrollToPageBottom() {
     window.scrollTo({ top: maxScroll, behavior: "smooth" });
 }
 
+function startBulkSoftTimeoutNotice(batch, status, message) {
+    return setTimeout(() => {
+        if (!isActiveBatch(batch) || batch.stopRequested) return;
+        if (status) status.innerText = message;
+    }, BULK_REQUEST_TIMEOUT_MS);
+}
+
 window.addEventListener("scroll", () => {
     scheduleVirtualTableRender();
     updateBatchJumpControls();
@@ -3249,16 +3313,16 @@ async function warmUpBatch(batch, status) {
         const file = batch.files[i];
         status.innerText = `Warming up server (${i + 1}/${warmupCount})... (Won't take more than 80 seconds)`;
         batch.abortController = new AbortController();
+        const softTimer = startBulkSoftTimeoutNotice(batch, status, `Warming up server (${i + 1}/${warmupCount}) is taking longer than 40 seconds...`);
 
         try {
-            const previewIds = selectedPreviewIds();
-            const runLineOcr = batch.requestLineOcr || shouldRequestLineOcr(previewIds, batch.settings);
-            await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr);
+            await postBulkImage(file, [], batch.abortController.signal, batch.settings, false, null, ["processing_ms"]);
         } catch (err) {
             if (!isActiveBatch(batch)) return;
             if (batch.stopRequested || err.message === "Batch stopped") break;
             console.warn(`Warmup request ignored for ${file.name}: ${err.message}`);
         } finally {
+            clearTimeout(softTimer);
             batch.abortController = null;
         }
 
@@ -3303,18 +3367,21 @@ async function runBatch(batch) {
         const runLineOcr = batch.requestLineOcr || shouldRequestLineOcr(previewIds, batch.settings);
 
         batch.abortController = new AbortController();
+        const softTimer = startBulkSoftTimeoutNotice(batch, status, `Image ${index + 1} of ${batch.files.length}: taking longer than 40 seconds, still waiting for the current request...`);
         try {
             const data = await postBulkImage(file, previewIds, batch.abortController.signal, batch.settings, runLineOcr, rowId);
+            clearTimeout(softTimer);
             batch.abortController = null;
             if (!isActiveBatch(batch)) return;
             if (batch.stopRequested) break;
             addBatchResult(batch, file, data);
         } catch (err) {
+            clearTimeout(softTimer);
             batch.abortController = null;
             if (!isActiveBatch(batch)) return;
             if (batch.stopRequested || err.message === "Batch stopped") break;
 
-            if (!isBulkRetryableError(err)) {
+            if (!isBulkRetryableError(err) || isBulkTimeoutError(err)) {
                 addBatchFailure(batch, file, err);
             } else {
                 const retryMessage = bulkRetryMessage(err);
@@ -3414,6 +3481,8 @@ document.getElementById("resume-batch-btn").addEventListener("click", async () =
     if (!activeBatch || activeBatch.running || activeBatch.finished) return;
     await runBatch(activeBatch);
 });
+
+document.getElementById("flush-dev-queue-btn")?.addEventListener("click", flushDevQueue);
 
 // --- ROW TOGGLE LISTENER ---
 // Listen to the table body. If a checkbox is clicked, update state and instantly rebuild histograms.
