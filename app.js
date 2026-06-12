@@ -205,7 +205,7 @@ async function generateArucoPrintSheetPdf() {
     const jsPDF = window.jspdf?.jsPDF;
     if (!jsPDF) throw new Error("PDF library failed to load. Refresh the page and try again.");
 
-    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter", precision: 12 });
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
     const margin = 14;
@@ -238,7 +238,7 @@ async function generateArucoPrintSheetPdf() {
     pdf.setTextColor(70, 82, 90);
     pdf.text(siteUrl, pageW - margin, 10.5, { align: "right" });
 
-    const introText = "Make sure one of these codes is printed out and visible in your images. Which one you use will depend on the size of the fruit you’re trying to phenotype. As long as one of these codes is fully visible in each of your images, it doesn’t matter which you use.\nMake sure that they are printed to the correct size indicated below.";
+    const introText = "Make sure one of these codes is printed out and visible in your images. Which one you use will depend on the size of the fruit you’re trying to phenotype. As long as one of these codes is fully visible in each of your images, it doesn’t matter which you use.\nMake sure that they are printed to the correct size indicated below. In your print dialog, use Actual Size / 100% scale and turn off Fit to Page or Shrink to Printable Area.";
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(10);
     pdf.setTextColor(30, 42, 50);
