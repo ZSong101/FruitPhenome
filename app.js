@@ -7,6 +7,7 @@ const SINGLE_REQUEST_TIMEOUT_MS = 60000; // 1 minute
 const BULK_REQUEST_TIMEOUT_MS = 40000;
 const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
 const BULK_RETRY_MESSAGE = "Taking longer than 40 seconds. Trying again...";
+const BULK_SERVER_RETRY_MESSAGE = "Server unavailable or warming up. Trying again...";
 const STOP_CONFIRM_MS = 3500;
 const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621315d0";
 
@@ -882,7 +883,15 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
             }
 
             if (!response.ok) {
-                throw new Error(data.message || `HTTP ${response.status}`);
+                const responseError = new Error(data.message || `HTTP ${response.status}`);
+                responseError.retryable = Boolean(data.retryable) || [502, 503, 504].includes(response.status);
+                throw responseError;
+            }
+
+            if (data.success === false && data.retryable) {
+                const retryableError = new Error(data.message || "Server temporarily unavailable.");
+                retryableError.retryable = true;
+                throw retryableError;
             }
 
             return data;
@@ -922,6 +931,14 @@ async function postBulkImage(file, previewIds, externalSignal = null, settings =
 
 function isBulkTimeoutError(err) {
     return err?.message === BULK_TIMEOUT_MESSAGE;
+}
+
+function isBulkRetryableError(err) {
+    return isBulkTimeoutError(err) || Boolean(err?.retryable);
+}
+
+function bulkRetryMessage(err) {
+    return isBulkTimeoutError(err) ? BULK_RETRY_MESSAGE : BULK_SERVER_RETRY_MESSAGE;
 }
 
 function previewCell(data) {
@@ -2501,12 +2518,12 @@ function addBatchResult(batch, file, data, replaceIndex = null) {
     }
 }
 
-function addBatchRetrying(file) {
+function addBatchRetrying(file, message = BULK_RETRY_MESSAGE) {
     const data = {
         filename: file.name,
-        warnings: [BULK_RETRY_MESSAGE],
+        warnings: [message],
         processing_ms: BULK_REQUEST_TIMEOUT_MS + 1,
-        processing_ms_timeout: true
+        processing_ms_timeout: message === BULK_RETRY_MESSAGE
     };
     globalBatchResults.push({
         file_name: file.name,
@@ -2515,11 +2532,11 @@ function addBatchRetrying(file) {
         isCm: false,
         allowPixelMetrics: true,
         digits: 0,
-        notes: BULK_RETRY_MESSAGE,
+        notes: message,
         success: false,
         retrying: true,
         includeFailedMetrics: true,
-        message: BULK_RETRY_MESSAGE
+        message
     });
     return globalBatchResults.length - 1;
 }
@@ -2533,7 +2550,7 @@ function removeBatchPlaceholder(index) {
 function addBatchFailure(batch, file, err, replaceIndex = null) {
     batch.failureCount++;
     const isTimeout = isBulkTimeoutError(err);
-    const msg = isTimeout ? BULK_TIMEOUT_MESSAGE : `API Error: ${err.message}`;
+    const msg = isTimeout ? BULK_TIMEOUT_MESSAGE : (err?.retryable ? err.message : `API Error: ${err.message}`);
     const data = {
         filename: file.name,
         warnings: [msg],
@@ -3253,11 +3270,12 @@ async function runBatch(batch) {
             if (!isActiveBatch(batch)) return;
             if (batch.stopRequested || err.message === "Batch stopped") break;
 
-            if (!isBulkTimeoutError(err)) {
+            if (!isBulkRetryableError(err)) {
                 addBatchFailure(batch, file, err);
             } else {
-                const retryIndex = addBatchRetrying(file);
-                status.innerText = `Image ${index + 1} of ${batch.files.length}: ${BULK_RETRY_MESSAGE}`;
+                const retryMessage = bulkRetryMessage(err);
+                const retryIndex = addBatchRetrying(file, retryMessage);
+                status.innerText = `Image ${index + 1} of ${batch.files.length}: ${retryMessage}`;
                 refreshBatchOutputs(chartsContainer, { debounceHistograms: true });
 
                 if (batch.stopRequested) {
