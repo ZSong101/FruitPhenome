@@ -194,6 +194,16 @@ function drawPdfDimensionGuide(pdf, x, y, sizeMm, label) {
 }
 
 function drawPdfMarker(pdf, marker, dataUrl, x, y) {
+    const cutPaddingMm = 3;
+    if (typeof pdf.setLineDashPattern === "function") {
+        pdf.setLineDashPattern([1.5, 1.2], 0);
+    }
+    pdf.setDrawColor(120, 130, 138);
+    pdf.setLineWidth(0.22);
+    pdf.rect(x - cutPaddingMm, y - cutPaddingMm, marker.sizeMm + cutPaddingMm * 2, marker.sizeMm + cutPaddingMm * 2);
+    if (typeof pdf.setLineDashPattern === "function") {
+        pdf.setLineDashPattern([], 0);
+    }
     pdf.addImage(dataUrl, "PNG", x, y, marker.sizeMm, marker.sizeMm);
     pdf.setDrawColor(30, 42, 50);
     pdf.setLineWidth(0.25);

@@ -425,7 +425,7 @@
           </div>
           <div id="compat-check-block" class="compat-check-block">
             <h3 class="compat-check-title">Data compatibility check (optional)</h3>
-            <p class="muted">Upload 2&ndash;5 sample images from your dataset to see how similar they look to the data this model was trained on. This check is advisory only and never blocks processing.</p>
+            <p class="muted">Upload 2&ndash;5 sample images from your dataset to see how similar they look to the data this model was trained on. Supported file types: JPG, JPEG, and PNG. This check is advisory only and never blocks processing.</p>
             <form id="compat-form" class="file-form">
               <input type="file" id="compat-files" multiple accept=".jpg,.jpeg,.png">
             </form>
@@ -458,6 +458,7 @@
       <form id="single-form" class="file-form">
         <input type="file" id="single-file" accept=".jpg,.jpeg,.png" required>
       </form>
+      <p class="muted supported-file-note">Supported file types: JPG, JPEG, and PNG.</p>
       <div class="analysis-toolbar single-toolbar">
         <div class="column-dropdown">
           <button type="button" id="single-column-menu-button" aria-expanded="false">Columns</button>
@@ -484,6 +485,7 @@
       <form id="bulk-form" class="file-form">
         <input type="file" id="bulk-files" multiple accept=".jpg,.jpeg,.png" required>
       </form>
+      <p class="muted supported-file-note">Supported file types: JPG, JPEG, and PNG.</p>
       
       <div class="analysis-toolbar bulk-toolbar">
         <div class="column-dropdown">
