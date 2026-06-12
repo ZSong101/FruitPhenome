@@ -491,6 +491,7 @@ function getAnalysisSettingsSnapshot() {
 function appendAnalysisSettings(formData, settings) {
     const snapshot = settings || getAnalysisSettingsSnapshot();
     formData.append("read_labels", snapshot.readLabels ? "true" : "false");
+    formData.append("read_qr", snapshot.readQr ? "true" : "false");
     formData.append("use_color_checker", snapshot.useColorChecker ? "true" : "false");
     formData.append("line_options", snapshot.lineOptions || "");
     formData.append("scale_value", snapshot.scaleValue || "");
