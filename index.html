@@ -308,13 +308,21 @@
         </div>
 
         <div class="wizard-step" data-step="3">
-          <h3 class="wizard-step-title">Step 3: On-screen labels</h3>
+          <h3 class="wizard-step-title">Step 3: On-screen labels and QR codes</h3>
           <div class="settings-checks">
             <label class="settings-check" for="read-labels-input">
               <input type="checkbox" id="read-labels-input">
               <span>On-screen labels
                 <span class="column-help-icon rich-help" tabindex="0">?
                   <span class="help-popover">Check this when images contain visible Line labels that should be read into the Line columns. Please be aware that handwritten digit recognition may not be 100% accurate.</span>
+                </span>
+              </span>
+            </label>
+            <label class="settings-check" for="read-qr-input">
+              <input type="checkbox" id="read-qr-input">
+              <span>QR code present
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Check this when images may include a QR code whose decoded data should be returned in the QR Data column. QR boxes are also drawn on requested preview images when detected.</span>
                 </span>
               </span>
             </label>

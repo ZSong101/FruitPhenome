@@ -73,6 +73,14 @@ function setLastUpdatedStamp() {
 }
 
 function activateTab(targetId) {
+    const analysisTarget = targetId === "single-panel" || targetId === "bulk-panel";
+    if (analysisTarget && !wizardCompleted) {
+        targetId = "settings-panel";
+        showWizardStep(wizardStep || 1);
+    } else if (analysisTarget) {
+        analysisTabsClicked = true;
+    }
+
     document.querySelectorAll(".tab-button").forEach(button => {
         const active = button.dataset.tabTarget === targetId;
         button.classList.toggle("active", active);
@@ -82,6 +90,8 @@ function activateTab(targetId) {
     document.querySelectorAll(".tab-panel").forEach(panel => {
         panel.classList.toggle("active", panel.id === targetId);
     });
+
+    updateAnalysisTabAvailability();
 }
 
 function initAppTabs() {
@@ -454,6 +464,7 @@ function getAnalysisSettingsSnapshot() {
     return {
         fruit: selectedFruit(),
         readLabels: checkboxChecked("read-labels-input", false),
+        readQr: checkboxChecked("read-qr-input", false),
         useColorChecker: checkboxChecked("use-color-checker-input", true),
         lineOptions: document.getElementById("line-options-input")?.value || "",
         scaleValue: (document.getElementById("scale-value-input")?.value || "").trim(),
@@ -496,7 +507,7 @@ function setupAnalysisSettingsControls() {
     document.querySelectorAll("#analysis-settings-fieldset input[type='range']").forEach(input => {
         input.addEventListener("input", updateSettingsSliderLabels);
     });
-    ["read-labels-input", "use-color-checker-input"].forEach(id => {
+    ["read-labels-input", "read-qr-input", "use-color-checker-input"].forEach(id => {
         document.getElementById(id)?.addEventListener("change", () => {
             const allFeatures = document.getElementById("mode-all-features-input");
             if (allFeatures) allFeatures.checked = false;
@@ -520,7 +531,7 @@ function setupAnalysisSettingsControls() {
     ["mode-standard-input", "mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input", "mode-all-features-input"].forEach(id => {
         document.getElementById(id)?.addEventListener("change", () => {
             if (id === "mode-all-features-input" && checkboxChecked(id, false)) {
-                ["read-labels-input", "use-color-checker-input", "mode-standard-input", "mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(otherId => {
+                ["read-labels-input", "read-qr-input", "use-color-checker-input", "mode-standard-input", "mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input"].forEach(otherId => {
                     const input = document.getElementById(otherId);
                     if (input) input.checked = true;
                 });
@@ -543,7 +554,7 @@ const WIZARD_SUMMARY_STEP = 6;
 const WIZARD_ALL_STEPS = [
     { step: 1, label: "Fruit" },
     { step: 2, label: "Scale & Calibration" },
-    { step: 3, label: "On-screen Labels" },
+    { step: 3, label: "Labels & Codes" },
     { step: 4, label: "Features" },
     { step: 5, label: "Manual Settings", requiresLegacy: true },
     { step: WIZARD_SUMMARY_STEP, label: "Review" }
@@ -553,6 +564,18 @@ let wizardStep = 1;
 let wizardCompleted = false;
 let wizardEditingFromSummary = false;
 let wizardEditManualWasVisible = true;
+let analysisTabsClicked = false;
+
+function updateAnalysisTabAvailability() {
+    const ready = Boolean(wizardCompleted);
+    ["single-tab", "bulk-tab"].forEach(id => {
+        const button = document.getElementById(id);
+        if (!button) return;
+        button.classList.toggle("setup-locked", !ready);
+        button.classList.toggle("setup-ready-highlight", ready && !analysisTabsClicked);
+        button.setAttribute("aria-disabled", ready ? "false" : "true");
+    });
+}
 
 function wizardStepElements() {
     return [...document.querySelectorAll("#analysis-settings-card .wizard-step")];
@@ -633,6 +656,7 @@ function showWizardStep(step, { fromEdit = false } = {}) {
     }
     renderWizardIndicator();
     updateWizardNav();
+    updateAnalysisTabAvailability();
 }
 
 function refreshWizardForSettings() {
@@ -646,6 +670,7 @@ function refreshWizardForSettings() {
     }
     renderWizardIndicator();
     updateWizardNav();
+    updateAnalysisTabAvailability();
 }
 
 function validateWizardStep(step) {
@@ -701,6 +726,7 @@ function wizardSummaryRows() {
         const lineCount = (settings.lineOptions || "").split(",").map(v => v.trim()).filter(Boolean).length;
         labelBits.push(lineCount ? `${lineCount} possible Line ID${lineCount === 1 ? "" : "s"}` : "No Line ID list");
     }
+    labelBits.push(settings.readQr ? "Read QR Data" : "No QR code reading");
 
     let featureNames = [];
     if (checkboxChecked("mode-all-features-input", false)) {
@@ -715,7 +741,7 @@ function wizardSummaryRows() {
     const rows = [
         { step: 1, label: "Fruit", value: fruitText || "Not selected" },
         { step: 2, label: "Scale & calibration", value: scaleBits.join(" - ") },
-        { step: 3, label: "On-screen labels", value: labelBits.join(" - ") },
+        { step: 3, label: "Labels & codes", value: labelBits.join(" - ") },
         { step: 4, label: "Features", value: featureNames.join(", ") || "None selected" }
     ];
     if (legacyFeaturesSelected()) {
@@ -1365,6 +1391,7 @@ function syncAnalysisModeCheckboxesFromColumns() {
     setCheckboxVisualState("mode-legacy-ta-input", columnSelectionState(columnIdsForGroup("traditional")));
     setCheckboxVisualState("mode-visual-comparison-input", columnSelectionState(columnIdsForGroup("previews_standard")));
     setBinaryCheckboxVisualState("read-labels-input", columnSelectionState([...OCR_STAGE_COLUMN_IDS]).any);
+    setBinaryCheckboxVisualState("read-qr-input", columnSelectionState([...QR_STAGE_COLUMN_IDS]).any);
     setBinaryCheckboxVisualState("use-color-checker-input", columnSelectionState([...COLOR_STAGE_COLUMN_IDS, "image_pre_calibration_base64"]).any);
     setAllFeaturesVisualState();
 }
@@ -1393,7 +1420,6 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
 
     const nextVisible = new Set();
     addColumnIds(nextVisible, ALWAYS_DEFAULT_COLUMN_IDS);
-    addColumnIds(nextVisible, QR_COLUMN_IDS);
 
     if (checkboxChecked("mode-all-features-input", false)) {
         addColumnIds(nextVisible, ALL_COLUMN_IDS);
@@ -1403,6 +1429,9 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
         }
         if (settings.readLabels) {
             addColumnIds(nextVisible, OCR_COLUMN_IDS);
+        }
+        if (settings.readQr) {
+            addColumnIds(nextVisible, QR_COLUMN_IDS);
         }
         if (checkboxChecked("mode-standard-input", true)) {
             addColumnIds(nextVisible, columnIdsForGroup("experimental_raw"));
@@ -1424,6 +1453,10 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
 
     if (!settings.readLabels && !checkboxChecked("mode-all-features-input", false)) {
         removeColumnIds(nextVisible, OCR_COLUMN_IDS);
+    }
+
+    if (!settings.readQr && !checkboxChecked("mode-all-features-input", false)) {
+        removeColumnIds(nextVisible, QR_COLUMN_IDS);
     }
 
     if (settings.readLabels && checkboxChecked("mode-visual-comparison-input", false)) {

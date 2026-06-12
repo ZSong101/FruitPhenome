@@ -66,6 +66,20 @@ h1 {
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
 }
 
+.tab-button.setup-locked {
+  opacity: 0.48;
+  color: #7b8790;
+  background: #eef1f4;
+  cursor: not-allowed;
+}
+
+.tab-button.setup-ready-highlight:not(.active) {
+  color: #075ccc;
+  border-color: #79aeff;
+  background: #e8f2ff;
+  box-shadow: 0 0 0 3px rgba(17, 112, 255, 0.12);
+}
+
 .tab-panel {
   display: none;
 }
