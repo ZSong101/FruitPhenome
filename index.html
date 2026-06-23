@@ -226,6 +226,67 @@
       .slider-value { text-align: left; }
       .help-depth-1, .help-depth-2 { margin-left: 0; }
     }
+
+    /* --- LABELING STUDIO --- */
+    .studio-toolbar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 12px 0 18px; }
+    .studio-toolbar label { display: inline-flex; flex-direction: column; gap: 4px; font-weight: 700; font-size: 13px; }
+    .studio-toolbar select, .studio-toolbar input[type="file"] { font-size: 14px; }
+    .studio-toolbar button { min-height: 38px; padding: 8px 14px; border: 1px solid #b9c3cc; border-radius: 6px; background: #eef1f4; color: #1e2a32; font-weight: 700; cursor: pointer; }
+    .studio-toolbar button:hover:not(:disabled) { background: #e1e6eb; }
+    .studio-toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #studio-export-btn { background: #0b3d91; color: #fff; border-color: #0b3d91; }
+    #studio-augment-export-btn { background: #146c43; color: #fff; border-color: #146c43; }
+    #studio-finetune-btn { background: #6936b3; color: #fff; border-color: #6936b3; }
+    .studio-augment-options { margin: -6px 0 18px; padding: 12px 14px; border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; }
+    .studio-augment-options summary { cursor: pointer; font-weight: 800; color: #1f3545; }
+    .studio-augment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 14px; margin-top: 10px; align-items: end; }
+    .studio-augment-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+    .studio-augment-grid input { padding: 7px 8px; border: 1px solid #c8d1d8; border-radius: 5px; font-size: 14px; }
+    .studio-augment-check { flex-direction: row !important; align-items: center; gap: 8px !important; }
+    .studio-augment-check input { width: auto; }
+    .studio-job { display: none; margin: -8px 0 16px; padding: 10px 12px; border: 1px solid #d8e1e8; border-radius: 8px; background: #f8fafb; }
+    .studio-job.visible { display: block; }
+    .studio-job-bar { height: 8px; border-radius: 999px; overflow: hidden; background: #e3eaf0; margin-top: 8px; }
+    .studio-job-fill { height: 100%; width: 0%; background: #146c43; transition: width 0.25s ease; }
+    .studio-main { display: grid; grid-template-columns: 200px minmax(0, 1fr) 230px; gap: 16px; align-items: start; }
+    .studio-queue { border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; padding: 10px; max-height: 640px; overflow: auto; }
+    .studio-queue h3, .studio-tools h3 { margin: 0 0 8px; font-size: 15px; }
+    #studio-queue-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+    .studio-queue-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 9px; border: 1px solid #dde4ea; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
+    .studio-queue-item:hover { background: #eef3f7; }
+    .studio-queue-item.active { border-color: #0b3d91; box-shadow: inset 0 0 0 1px #0b3d91; }
+    .studio-queue-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .studio-status-badge { flex: 0 0 auto; font-size: 10.5px; font-weight: 800; text-transform: uppercase; padding: 2px 6px; border-radius: 999px; background: #e3eaf0; color: #5b6a75; }
+    .studio-status-badge.prelabeled { background: #fff3d6; color: #8a6400; }
+    .studio-status-badge.draft { background: #dceeff; color: #23608f; }
+    .studio-status-badge.approved { background: #d7f6df; color: #176c34; }
+    .studio-canvas-wrap { min-width: 0; }
+    .studio-canvas-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .studio-canvas-actions button { min-height: 38px; padding: 8px 14px; border: 1px solid #b9c3cc; border-radius: 6px; background: #eef1f4; color: #1e2a32; font-weight: 700; cursor: pointer; }
+    .studio-canvas-actions button:hover:not(:disabled) { background: #e1e6eb; }
+    .studio-canvas-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #studio-prelabel-btn { background: #146c43; color: #fff; border-color: #146c43; }
+    #studio-approve-btn { background: #0b3d91; color: #fff; border-color: #0b3d91; }
+    .studio-canvas-host { position: relative; border: 1px solid #d8e1e8; border-radius: 8px; background: #2b3640; min-height: 320px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #studio-canvas { max-width: 100%; touch-action: none; cursor: crosshair; display: block; }
+    #studio-canvas-empty { color: #cfd8df; }
+    .studio-tools { border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; padding: 12px; }
+    .studio-tool-group { margin-bottom: 14px; }
+    .studio-tool-label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+    .studio-layer-buttons { display: grid; gap: 6px; }
+    .studio-layer-btn { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid #c7d0d8; border-radius: 6px; background: #fff; cursor: pointer; font-weight: 700; font-size: 13px; text-align: left; }
+    .studio-layer-btn .swatch { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,0.2); }
+    .studio-layer-btn.active { border-color: #1e2a32; box-shadow: inset 0 0 0 1px #1e2a32; }
+    .studio-tool-btn { padding: 7px 12px; border: 1px solid #c7d0d8; border-radius: 6px; background: #fff; cursor: pointer; font-weight: 700; margin-right: 6px; }
+    .studio-tool-btn.active { background: #1e2a32; color: #fff; border-color: #1e2a32; }
+    .studio-tool-group input[type="range"] { width: 100%; }
+    .studio-qa { font-size: 12.5px; line-height: 1.4; }
+    .studio-qa .studio-qa-warn { color: #8a6400; margin: 3px 0; }
+    .studio-qa .studio-qa-ok { color: #176c34; font-weight: 700; }
+    @media (max-width: 900px) {
+      .studio-main { grid-template-columns: 1fr; }
+      .studio-queue { max-height: 220px; }
+    }
   </style>
 </head>
 <body>
@@ -259,6 +320,7 @@
       <button type="button" class="tab-button active" id="settings-tab" role="tab" aria-selected="true" aria-controls="settings-panel" data-tab-target="settings-panel">Main</button>
       <button type="button" class="tab-button" id="single-tab" role="tab" aria-selected="false" aria-controls="single-panel" data-tab-target="single-panel">Single Image Analysis</button>
       <button type="button" class="tab-button" id="bulk-tab" role="tab" aria-selected="false" aria-controls="bulk-panel" data-tab-target="bulk-panel">Bulk Image Analysis</button>
+      <button type="button" class="tab-button" id="labeling-tab" role="tab" aria-selected="false" aria-controls="labeling-panel" data-tab-target="labeling-panel">Labeling Studio</button>
     </nav>
 
     <div class="tab-panel active" id="settings-panel" role="tabpanel" aria-labelledby="settings-tab">
@@ -450,6 +512,7 @@
             </div>
             <p id="compat-summary" class="compat-summary"></p>
             <div id="compat-results" class="compat-results"></div>
+            <button type="button" id="compat-create-dataset-btn" style="display:none; margin-top:12px;">Create a labeling dataset from these samples</button>
           </div>
           <div class="compat-example-block">
             <h3 class="compat-example-title">Example Image and Output Previews</h3>
@@ -567,6 +630,103 @@
     </section>
     </div>
 
+    <div class="tab-panel" id="labeling-panel" role="tabpanel" aria-labelledby="labeling-tab">
+    <section class="card">
+      <h2>Labeling Studio</h2>
+      <p class="muted">Pre-label images with the current model, correct the masks with a brush and eraser, then export a YOLO training bundle. Images and labels stay in the platform dataset store.</p>
+      <div id="studio-auth-note" class="status"></div>
+
+      <div class="studio-toolbar">
+        <label for="studio-dataset-select">Dataset
+          <select id="studio-dataset-select"></select>
+        </label>
+        <button id="studio-new-dataset-btn" type="button">+ New</button>
+        <label for="studio-upload-input">Upload images
+          <input id="studio-upload-input" type="file" multiple accept=".jpg,.jpeg,.png">
+        </label>
+        <button id="studio-export-btn" type="button">Export ZIP</button>
+        <button id="studio-augment-export-btn" type="button">Augment export</button>
+        <button id="studio-finetune-btn" type="button" title="Train the model on the corrected masks in this dataset. Balanced across the latent space to avoid bias.">Fine-tune from corrections</button>
+        <span id="studio-status" class="muted" role="status"></span>
+      </div>
+      <details class="studio-augment-options">
+        <summary>Augmented export options</summary>
+        <div class="studio-augment-grid">
+          <label for="studio-aug-count">Random augs / image
+            <input id="studio-aug-count" type="number" min="0" max="80" value="12">
+          </label>
+          <label for="studio-bg-prob">Background swap probability
+            <input id="studio-bg-prob" type="number" min="0" max="1" step="0.05" value="0.25">
+          </label>
+          <label for="studio-val-fraction">Validation fraction
+            <input id="studio-val-fraction" type="number" min="0" max="0.5" step="0.05" value="0.20">
+          </label>
+          <label for="studio-aug-seed">Seed
+            <input id="studio-aug-seed" type="number" value="42">
+          </label>
+          <label class="studio-augment-check" for="studio-include-fixed">
+            <input id="studio-include-fixed" type="checkbox" checked>
+            Include fixed notebook augmentations
+          </label>
+        </div>
+      </details>
+      <div id="studio-aug-job" class="studio-job">
+        <div id="studio-aug-job-text" class="muted">Augmentation queued.</div>
+        <div class="studio-job-bar"><div id="studio-aug-job-fill" class="studio-job-fill"></div></div>
+      </div>
+      <div id="studio-train-job" class="studio-job">
+        <div id="studio-train-job-text" class="muted">Training queued.</div>
+        <div class="studio-job-bar"><div id="studio-train-job-fill" class="studio-job-fill"></div></div>
+      </div>
+
+      <div class="studio-main">
+        <aside class="studio-queue">
+          <h3>Images</h3>
+          <ul id="studio-queue-list"></ul>
+        </aside>
+
+        <div class="studio-canvas-wrap">
+          <div class="studio-canvas-actions">
+            <button id="studio-prelabel-btn" type="button">Pre-label</button>
+            <button id="studio-undo-btn" type="button">Undo</button>
+            <button id="studio-redo-btn" type="button">Redo</button>
+            <button id="studio-save-btn" type="button">Save</button>
+            <button id="studio-approve-btn" type="button">Approve &amp; Next</button>
+          </div>
+          <div id="studio-canvas-host" class="studio-canvas-host">
+            <canvas id="studio-canvas" width="0" height="0"></canvas>
+            <p id="studio-canvas-empty">Select an image to start labeling.</p>
+          </div>
+        </div>
+
+        <aside class="studio-tools">
+          <h3>Tools</h3>
+          <div class="studio-tool-group">
+            <span class="studio-tool-label">Class layer</span>
+            <div id="studio-layer-buttons" class="studio-layer-buttons"></div>
+          </div>
+          <div class="studio-tool-group">
+            <span class="studio-tool-label">Tool</span>
+            <button id="studio-brush-btn" type="button" class="studio-tool-btn active">Brush</button>
+            <button id="studio-eraser-btn" type="button" class="studio-tool-btn">Eraser</button>
+          </div>
+          <div class="studio-tool-group">
+            <label for="studio-brush-size">Brush size <span id="studio-brush-size-val">40</span> px</label>
+            <input id="studio-brush-size" type="range" min="3" max="250" value="40">
+          </div>
+          <div class="studio-tool-group">
+            <label for="studio-opacity">Overlay opacity <span id="studio-opacity-val">55</span>%</label>
+            <input id="studio-opacity" type="range" min="10" max="100" value="55">
+          </div>
+          <div class="studio-tool-group">
+            <span class="studio-tool-label">QA checks</span>
+            <div id="studio-qa" class="studio-qa"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+    </div>
+
     <footer id="last-updated-stamp" class="app-footer">Last updated: loading...</footer>
   </main>
 
@@ -580,6 +740,11 @@
   <script>
     const appScript = document.createElement("script");
     appScript.src = `app.js?v=${window.APP_ASSET_VERSION || Date.now()}`;
+    appScript.onload = () => {
+      const studioScript = document.createElement("script");
+      studioScript.src = `labeling.js?v=${window.APP_ASSET_VERSION || Date.now()}`;
+      document.body.appendChild(studioScript);
+    };
     document.body.appendChild(appScript);
   </script>
 </body>

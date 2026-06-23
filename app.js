@@ -367,6 +367,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
         }
         
         startQueuePolling(); // Boot up the live dashboard
+        loadExperts(); // Populate the fruit dropdown from the trained-expert registry
     } else {
         errorDiv.innerText = "Incorrect password.";
     }
@@ -477,10 +478,67 @@ function selectedFruit() {
     return document.getElementById("fruit-select")?.value || "";
 }
 
+// Fruit types that have a trained expert in the registry. Seeded with
+// watermelon so validation works before /experts loads; refreshed after login
+// and after onboarding a new fruit.
+let knownFruitTypes = new Set(["watermelon"]);
+
+function isKnownFruit(value) {
+    return knownFruitTypes.has(String(value || "").trim().toLowerCase());
+}
+
+function expertsUrl() {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_experts" : "experts"}`;
+}
+
+function rebuildFruitOptions(experts) {
+    const select = document.getElementById("fruit-select");
+    if (!select) return;
+    const previous = select.value;
+    const trained = Array.isArray(experts) ? experts : [];
+    knownFruitTypes = new Set(trained.map(e => String(e.fruit_type || "").trim().toLowerCase()).filter(Boolean));
+    if (knownFruitTypes.size === 0) knownFruitTypes.add("watermelon");
+
+    const options = ['<option value="" selected disabled>Select fruit...</option>'];
+    const seen = new Set();
+    trained.forEach(e => {
+        const ft = String(e.fruit_type || "").trim();
+        if (!ft || seen.has(ft.toLowerCase())) return;
+        seen.add(ft.toLowerCase());
+        const label = e.label || (ft.charAt(0).toUpperCase() + ft.slice(1).replace(/_/g, " "));
+        options.push(`<option value="${ft}">${label}</option>`);
+    });
+    if (!seen.has("watermelon")) {
+        options.splice(1, 0, '<option value="watermelon">Watermelon</option>');
+        knownFruitTypes.add("watermelon");
+    }
+    // "Other" triggers the new-fruit onboarding flow (handled elsewhere).
+    options.push('<option value="other">Other (train a new fruit)</option>');
+    select.innerHTML = options.join("\n");
+    if (previous && (knownFruitTypes.has(previous.toLowerCase()) || previous === "other")) {
+        select.value = previous;
+    }
+}
+
+window.refreshExperts = function () { return loadExperts(); };
+
+async function loadExperts() {
+    try {
+        const url = `${expertsUrl()}?username=${encodeURIComponent(currentUsername || "")}&password=${encodeURIComponent(currentPassword || "")}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data && data.success && Array.isArray(data.experts)) {
+            rebuildFruitOptions(data.experts);
+        }
+    } catch (err) {
+        console.warn("Could not load experts; keeping default fruit options.", err);
+    }
+}
+
 function requireWalkthroughComplete(statusEl) {
     const fruitSelect = document.getElementById("fruit-select");
     const fruitStatus = document.getElementById("fruit-select-status");
-    if (wizardCompleted && fruitSelect?.value === "watermelon") {
+    if (wizardCompleted && isKnownFruit(fruitSelect?.value)) {
         fruitSelect.classList.remove("input-error");
         fruitStatus?.classList.remove("visible");
         return true;
@@ -490,7 +548,7 @@ function requireWalkthroughComplete(statusEl) {
         statusEl.innerText = "Complete the Analysis Setup walkthrough on the Main tab before processing.";
     }
     activateTab("settings-panel");
-    const targetStep = fruitSelect?.value === "watermelon" ? wizardStep : 1;
+    const targetStep = isKnownFruit(fruitSelect?.value) ? wizardStep : 1;
     showWizardStep(targetStep);
     validateWizardStep(targetStep);
     return false;
@@ -516,6 +574,7 @@ function getAnalysisSettingsSnapshot() {
 
 function appendAnalysisSettings(formData, settings) {
     const snapshot = settings || getAnalysisSettingsSnapshot();
+    formData.append("fruit_type", snapshot.fruit || "");
     formData.append("read_labels", snapshot.readLabels ? "true" : "false");
     formData.append("read_qr", snapshot.readQr ? "true" : "false");
     formData.append("use_color_checker", snapshot.useColorChecker ? "true" : "false");
@@ -580,7 +639,16 @@ function setupAnalysisSettingsControls() {
         });
     });
     document.getElementById("fruit-select")?.addEventListener("change", (event) => {
-        const invalid = event.target.value !== "watermelon";
+        const value = event.target.value;
+        if (value === "other") {
+            event.target.classList.remove("input-error");
+            document.getElementById("fruit-select-status")?.classList.remove("visible");
+            if (window.FruitOnboarding && typeof window.FruitOnboarding.start === "function") {
+                window.FruitOnboarding.start();
+            }
+            return;
+        }
+        const invalid = !isKnownFruit(value);
         event.target.classList.toggle("input-error", invalid);
         document.getElementById("fruit-select-status")?.classList.toggle("visible", invalid);
     });
@@ -713,7 +781,7 @@ function refreshWizardForSettings() {
 function validateWizardStep(step) {
     if (step !== 1) return true;
     const fruitSelect = document.getElementById("fruit-select");
-    const valid = fruitSelect?.value === "watermelon";
+    const valid = isKnownFruit(fruitSelect?.value);
     fruitSelect?.classList.toggle("input-error", !valid);
     document.getElementById("fruit-select-status")?.classList.toggle("visible", !valid);
     if (!valid) setTimeout(() => fruitSelect?.focus(), 0);
@@ -834,6 +902,11 @@ function renderCompatibilityResults(data) {
     resultsEl.innerHTML = rows.join("");
 
     const verdicts = (data.results || []).filter(item => item.success).map(item => item.verdict);
+    const ctaBtn = document.getElementById("compat-create-dataset-btn");
+    if (ctaBtn) {
+        const needsLabeling = verdicts.includes("incompatible") || verdicts.includes("borderline");
+        ctaBtn.style.display = needsLabeling ? "inline-block" : "none";
+    }
     summaryEl.classList.remove("ok", "warn", "bad");
     if (!verdicts.length) {
         summaryEl.innerText = "No images could be checked.";
@@ -857,7 +930,26 @@ function setupCompatibilityCheck() {
     const status = document.getElementById("compat-status");
     const summaryEl = document.getElementById("compat-summary");
     const resultsEl = document.getElementById("compat-results");
+    const createDatasetBtn = document.getElementById("compat-create-dataset-btn");
     if (!button || !input) return;
+
+    createDatasetBtn?.addEventListener("click", async () => {
+        const files = [...(input.files || [])].slice(0, COMPAT_MAX_FILES);
+        if (!files.length) {
+            if (status) status.innerText = "Choose your sample images first.";
+            return;
+        }
+        if (!window.LabelingStudio) {
+            if (status) status.innerText = "Labeling Studio is not available.";
+            return;
+        }
+        createDatasetBtn.disabled = true;
+        try {
+            await window.LabelingStudio.createDatasetFromFiles("Compatibility samples", files);
+        } finally {
+            createDatasetBtn.disabled = false;
+        }
+    });
 
     button.addEventListener("click", async () => {
         const files = [...(input.files || [])].slice(0, COMPAT_MAX_FILES);
