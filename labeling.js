@@ -23,6 +23,7 @@
 
     // --- State ---
     let currentDatasetId = null;
+    let datasetSummaries = [];
     let images = [];               // [{image_id, filename, status, width, height}]
     let currentImageId = null;
     let baseImage = null;          // HTMLImageElement of the source photo
@@ -30,9 +31,14 @@
     let displayScale = 1;
     const layerCanvas = {};        // layer -> offscreen canvas (image resolution, colored)
     let activeLayer = "whole";
-    let tool = "brush";            // "brush" | "eraser"
+    let tool = "brush";            // "brush" | "eraser" | "pan"
     let brushSize = 40;
-    let overlayOpacity = 0.55;
+    const layerOpacity = { whole: 0.55, flesh_left: 0.55, flesh_right: 0.55 };
+    let zoomLevel = 1;
+    let panX = 0;
+    let panY = 0;
+    let panning = false;
+    let panStart = null;
 
     let painting = false;
     let lastPt = null;
@@ -51,7 +57,6 @@
         return {
             authNote: el("studio-auth-note"),
             datasetSelect: el("studio-dataset-select"),
-            newBtn: el("studio-new-dataset-btn"),
             uploadInput: el("studio-upload-input"),
             exportBtn: el("studio-export-btn"),
             augmentExportBtn: el("studio-augment-export-btn"),
@@ -63,10 +68,14 @@
             augJob: el("studio-aug-job"),
             augJobText: el("studio-aug-job-text"),
             augJobFill: el("studio-aug-job-fill"),
+            augmentPreviewBtn: el("studio-augment-preview-btn"),
+            augmentPreviewStatus: el("studio-augment-preview-status"),
+            augmentPreview: el("studio-augment-preview"),
             finetuneBtn: el("studio-finetune-btn"),
             trainJob: el("studio-train-job"),
             trainJobText: el("studio-train-job-text"),
             trainJobFill: el("studio-train-job-fill"),
+            modelPlan: el("studio-model-plan"),
             status: el("studio-status"),
             queueList: el("studio-queue-list"),
             prelabelBtn: el("studio-prelabel-btn"),
@@ -75,14 +84,20 @@
             saveBtn: el("studio-save-btn"),
             approveBtn: el("studio-approve-btn"),
             canvas: el("studio-canvas"),
+            canvasHost: el("studio-canvas-host"),
             canvasEmpty: el("studio-canvas-empty"),
             layerButtons: el("studio-layer-buttons"),
             brushBtn: el("studio-brush-btn"),
             eraserBtn: el("studio-eraser-btn"),
+            panBtn: el("studio-pan-btn"),
             brushSize: el("studio-brush-size"),
             brushSizeVal: el("studio-brush-size-val"),
             opacity: el("studio-opacity"),
             opacityVal: el("studio-opacity-val"),
+            zoomOutBtn: el("studio-zoom-out-btn"),
+            zoomInBtn: el("studio-zoom-in-btn"),
+            zoomResetBtn: el("studio-zoom-reset-btn"),
+            zoomValue: el("studio-zoom-value"),
             qa: el("studio-qa")
         };
     }
@@ -113,6 +128,10 @@
 
     function loggedIn() {
         return Boolean(currentPassword);
+    }
+
+    function selectedStudioFruit() {
+        return (typeof selectedFruit === "function" && selectedFruit()) || "";
     }
 
     async function apiGetJson(path) {
@@ -157,12 +176,19 @@
         try {
             const data = await apiGetJson("");
             if (!data.success) throw new Error(data.message || "Could not load datasets.");
-            const datasets = data.datasets || [];
-            d.datasetSelect.innerHTML = datasets.length
-                ? datasets.map((ds) => `<option value="${esc(ds.dataset_id)}">${esc(ds.name)} (${ds.image_count} img)</option>`).join("")
-                : `<option value="">No datasets yet — create one</option>`;
+            const selected = selectedStudioFruit();
+            datasetSummaries = (data.datasets || []).filter((ds) => (
+                !selected || selected === "other" || String(ds.fruit_type || "watermelon").toLowerCase() === selected.toLowerCase()
+            ));
+            const options = [`<option value="">Select dataset...</option>`];
+            datasetSummaries.forEach((ds) => {
+                const fruit = String(ds.fruit_type || "watermelon").replace(/_/g, " ");
+                options.push(`<option value="${esc(ds.dataset_id)}">${esc(ds.name)} · ${esc(fruit)} (${ds.image_count} img)</option>`);
+            });
+            options.push(`<option value="__new__">+ Create new dataset...</option>`);
+            d.datasetSelect.innerHTML = options.join("");
             datasetsLoaded = true;
-            const target = selectId || (datasets[0] && datasets[0].dataset_id);
+            const target = selectId || currentDatasetId || (datasetSummaries[0] && datasetSummaries[0].dataset_id);
             if (target) {
                 d.datasetSelect.value = target;
                 await selectDataset(target);
@@ -170,6 +196,7 @@
                 currentDatasetId = null;
                 images = [];
                 renderQueue();
+                renderModelPlan(null);
             }
             setStatus("");
         } catch (err) {
@@ -181,15 +208,63 @@
         currentDatasetId = datasetId || null;
         currentImageId = null;
         clearCanvas();
+        const d = dom();
+        if (d.augmentPreview) {
+            d.augmentPreview.classList.remove("visible");
+            d.augmentPreview.innerHTML = "";
+        }
+        if (d.augmentPreviewStatus) d.augmentPreviewStatus.innerText = "";
         if (!currentDatasetId) {
             images = [];
             renderQueue();
+            renderModelPlan(null);
+            updateButtons();
             return;
         }
         try {
-            await loadImageList();
+            renderModelPlan({ loading: true });
+            await Promise.all([loadImageList(), loadTrainingTarget()]);
         } catch (err) {
             setStatus(`Could not open dataset: ${err.message}`, true);
+        }
+        updateButtons();
+    }
+
+    function currentDatasetSummary() {
+        return datasetSummaries.find((ds) => ds.dataset_id === currentDatasetId) || null;
+    }
+
+    function renderModelPlan(plan) {
+        const d = dom();
+        if (!d.modelPlan) return;
+        if (!plan) {
+            d.modelPlan.innerText = "Select a dataset to see which model will be fine-tuned or copied.";
+            return;
+        }
+        if (plan.loading) {
+            d.modelPlan.innerText = "Resolving the exact model for this dataset...";
+            return;
+        }
+        if (plan.error) {
+            d.modelPlan.innerText = `Model plan unavailable: ${plan.error}`;
+            return;
+        }
+        const fruit = String(plan.fruit_type || currentDatasetSummary()?.fruit_type || "watermelon").replace(/_/g, " ");
+        if (plan.operation === "copy_then_fine_tune") {
+            d.modelPlan.innerText = `Model plan for ${fruit}: copy ${plan.base_id}, then fine-tune it as ${plan.candidate_id}.`;
+        } else {
+            d.modelPlan.innerText = `Model plan for ${fruit}: fine-tune ${plan.base_id} into candidate ${plan.candidate_id}.`;
+        }
+    }
+
+    async function loadTrainingTarget() {
+        if (!currentDatasetId) return;
+        try {
+            const data = await apiGetJson(`/${currentDatasetId}/training_target`);
+            if (!data.success) throw new Error(data.message || "Could not resolve model.");
+            renderModelPlan(data);
+        } catch (err) {
+            renderModelPlan({ error: err.message });
         }
     }
 
@@ -220,17 +295,21 @@
     }
 
     async function createDataset() {
-        const name = window.prompt("New dataset name:", "Watermelon batch");
-        if (name === null) return;
+        const fruitType = selectedStudioFruit() || "watermelon";
+        const fruitLabel = fruitType.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
+        const name = window.prompt("New dataset name:", `${fruitLabel} batch`);
+        if (name === null) return null;
         try {
             setStatus("Creating dataset...");
-            const data = await apiPostJson("", { name, fruit_type: "watermelon", source: "manual_upload" });
+            const data = await apiPostJson("", { name, fruit_type: fruitType, source: "manual_upload" });
             if (!data.success) throw new Error(data.message || "Create failed.");
             datasetsLoaded = false;
             await loadDatasets(data.dataset.dataset_id);
             setStatus("Dataset created.");
+            return data.dataset.dataset_id;
         } catch (err) {
             setStatus(`Create failed: ${err.message}`, true);
+            return null;
         }
     }
 
@@ -362,6 +441,30 @@
         }
     }
 
+    async function previewAugmentations() {
+        if (!currentDatasetId) {
+            setStatus("Select a dataset to preview augmentations.", true);
+            return;
+        }
+        const d = dom();
+        try {
+            d.augmentPreviewBtn.disabled = true;
+            if (d.augmentPreviewStatus) d.augmentPreviewStatus.innerText = "Generating preview...";
+            const data = await apiPostJson(`/${currentDatasetId}/augment_preview`, readAugmentOptions());
+            if (!data.success) throw new Error(data.message || "Could not generate preview.");
+            const src = `data:image/jpeg;base64,${data.image_base64}`;
+            d.augmentPreview.innerHTML = `<img class="preview-img" src="${src}" alt="Augmentation contact sheet" title="Open full-size augmentation preview">`;
+            d.augmentPreview.classList.add("visible");
+            if (d.augmentPreviewStatus) {
+                d.augmentPreviewStatus.innerText = `${data.count || 0} examples generated with the current settings.`;
+            }
+        } catch (err) {
+            if (d.augmentPreviewStatus) d.augmentPreviewStatus.innerText = `Preview failed: ${err.message}`;
+        } finally {
+            d.augmentPreviewBtn.disabled = !currentDatasetId;
+        }
+    }
+
     // --- Fine-tune from corrections ---
     function trainApiUrl(kind) {
         // kind: "finetune" | "job" | "jobs"
@@ -388,6 +491,9 @@
                 extra = ` [candidate ${c?.toFixed ? c.toFixed(3) : c}${typeof b === "number" ? ` vs incumbent ${b.toFixed(3)}` : ""}]`;
             }
             d.trainJobText.innerText = `${status}${job.message || ""} (${progress}%)${extra}`;
+        }
+        if (job.base_id && (job.candidate_expert_id || job.expert_id) && d.modelPlan) {
+            d.modelPlan.innerText = `Training job: ${job.base_id} → ${job.candidate_expert_id || job.expert_id}.`;
         }
     }
 
@@ -473,6 +579,7 @@
         undoStack = [];
         redoStack = [];
         dirty = false;
+        hoverPt = null;
         LAYERS.forEach((layer) => { delete layerCanvas[layer]; });
         if (d.canvas) {
             d.canvas.width = 0;
@@ -480,6 +587,7 @@
             d.canvas.style.display = "none";
         }
         if (d.canvasEmpty) d.canvasEmpty.style.display = "block";
+        resetViewport();
         renderQa(null);
         updateButtons();
     }
@@ -564,6 +672,35 @@
         d.canvas.style.display = "block";
         if (d.canvasEmpty) d.canvasEmpty.style.display = "none";
         displayCtx = d.canvas.getContext("2d");
+        resetViewport();
+    }
+
+    function applyViewportTransform() {
+        const d = dom();
+        if (!d.canvas) return;
+        d.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+        d.canvas.classList.toggle("pan-active", tool === "pan");
+        d.canvas.classList.toggle("panning", panning);
+        if (d.zoomValue) d.zoomValue.innerText = `${Math.round(zoomLevel * 100)}%`;
+    }
+
+    function setZoom(nextZoom) {
+        zoomLevel = Math.max(1, Math.min(8, Number(nextZoom) || 1));
+        if (zoomLevel === 1) {
+            panX = 0;
+            panY = 0;
+        }
+        applyViewportTransform();
+        updateButtons();
+    }
+
+    function resetViewport() {
+        zoomLevel = 1;
+        panX = 0;
+        panY = 0;
+        panning = false;
+        panStart = null;
+        applyViewportTransform();
     }
 
     function composite() {
@@ -574,7 +711,7 @@
         displayCtx.clearRect(0, 0, w, h);
         displayCtx.drawImage(baseImage, 0, 0, w, h);
         LAYERS.forEach((layer) => {
-            displayCtx.globalAlpha = layer === activeLayer ? Math.min(1, overlayOpacity + 0.2) : overlayOpacity;
+            displayCtx.globalAlpha = layerOpacity[layer];
             displayCtx.drawImage(layerCanvas[layer], 0, 0, w, h);
         });
         displayCtx.globalAlpha = 1;
@@ -626,7 +763,7 @@
     }
 
     function beginStroke(event) {
-        if (!baseImage) return;
+        if (!baseImage || tool === "pan") return;
         painting = true;
         const lctx = layerCanvas[activeLayer].getContext("2d");
         strokeBefore = lctx.getImageData(0, 0, imgW, imgH);
@@ -637,6 +774,12 @@
     }
 
     function moveStroke(event) {
+        if (panning && panStart) {
+            panX = panStart.panX + (event.clientX - panStart.clientX);
+            panY = panStart.panY + (event.clientY - panStart.clientY);
+            applyViewportTransform();
+            return;
+        }
         const pt = pointToImage(event);
         hoverPt = pt;
         if (painting && lastPt) {
@@ -658,6 +801,20 @@
             dirty = true;
         }
         updateButtons();
+    }
+
+    function beginPan(event) {
+        if (!baseImage || zoomLevel <= 1) return;
+        panning = true;
+        panStart = { clientX: event.clientX, clientY: event.clientY, panX, panY };
+        applyViewportTransform();
+    }
+
+    function endPan() {
+        if (!panning) return;
+        panning = false;
+        panStart = null;
+        applyViewportTransform();
     }
 
     function undo() {
@@ -809,6 +966,9 @@
     // --- Tools UI ---
     function setActiveLayer(layer) {
         activeLayer = layer;
+        const d = dom();
+        if (d.opacity) d.opacity.value = String(Math.round(layerOpacity[layer] * 100));
+        if (d.opacityVal) d.opacityVal.innerText = String(Math.round(layerOpacity[layer] * 100));
         renderLayerButtons();
         composite();
     }
@@ -829,6 +989,8 @@
         const d = dom();
         d.brushBtn.classList.toggle("active", tool === "brush");
         d.eraserBtn.classList.toggle("active", tool === "eraser");
+        d.panBtn.classList.toggle("active", tool === "pan");
+        applyViewportTransform();
     }
 
     function updateButtons() {
@@ -842,6 +1004,10 @@
         if (d.exportBtn) d.exportBtn.disabled = !currentDatasetId;
         if (d.augmentExportBtn) d.augmentExportBtn.disabled = !currentDatasetId;
         if (d.finetuneBtn) d.finetuneBtn.disabled = !currentDatasetId;
+        if (d.augmentPreviewBtn) d.augmentPreviewBtn.disabled = !currentDatasetId;
+        if (d.zoomInBtn) d.zoomInBtn.disabled = !hasImage || zoomLevel >= 8;
+        if (d.zoomOutBtn) d.zoomOutBtn.disabled = !hasImage || zoomLevel <= 1;
+        if (d.zoomResetBtn) d.zoomResetBtn.disabled = !hasImage || (zoomLevel === 1 && panX === 0 && panY === 0);
     }
 
     // --- Public hook for the OOD compatibility handoff (used by app.js) ---
@@ -917,11 +1083,19 @@
         const d = dom();
         if (!d.canvas) return;
 
-        d.newBtn?.addEventListener("click", createDataset);
         d.exportBtn?.addEventListener("click", exportZip);
         d.augmentExportBtn?.addEventListener("click", augmentExportZip);
+        d.augmentPreviewBtn?.addEventListener("click", previewAugmentations);
         d.finetuneBtn?.addEventListener("click", () => startFinetune());
-        d.datasetSelect?.addEventListener("change", (e) => selectDataset(e.target.value));
+        d.datasetSelect?.addEventListener("change", async (e) => {
+            if (e.target.value === "__new__") {
+                const previous = currentDatasetId || "";
+                const created = await createDataset();
+                if (!created) e.target.value = previous;
+                return;
+            }
+            await selectDataset(e.target.value);
+        });
         d.uploadInput?.addEventListener("change", (e) => {
             uploadImages(e.target.files);
             e.target.value = "";
@@ -940,6 +1114,7 @@
 
         d.brushBtn?.addEventListener("click", () => setTool("brush"));
         d.eraserBtn?.addEventListener("click", () => setTool("eraser"));
+        d.panBtn?.addEventListener("click", () => setTool("pan"));
         d.layerButtons?.addEventListener("click", (e) => {
             const btn = e.target.closest(".studio-layer-btn");
             if (btn && btn.dataset.layer) setActiveLayer(btn.dataset.layer);
@@ -951,19 +1126,28 @@
             composite();
         });
         d.opacity?.addEventListener("input", (e) => {
-            overlayOpacity = Number(e.target.value) / 100;
+            layerOpacity[activeLayer] = Number(e.target.value) / 100;
             d.opacityVal.innerText = e.target.value;
             composite();
         });
 
         d.canvas.addEventListener("pointerdown", (e) => {
             d.canvas.setPointerCapture(e.pointerId);
-            beginStroke(e);
+            if (tool === "pan" || e.button === 1) beginPan(e);
+            else beginStroke(e);
         });
         d.canvas.addEventListener("pointermove", moveStroke);
-        d.canvas.addEventListener("pointerup", endStroke);
+        d.canvas.addEventListener("pointerup", () => { endStroke(); endPan(); });
         d.canvas.addEventListener("pointerleave", () => { hoverPt = null; composite(); });
-        window.addEventListener("pointerup", endStroke);
+        window.addEventListener("pointerup", () => { endStroke(); endPan(); });
+        d.canvasHost?.addEventListener("wheel", (e) => {
+            if (!baseImage) return;
+            e.preventDefault();
+            setZoom(zoomLevel * (e.deltaY < 0 ? 1.18 : 0.85));
+        }, { passive: false });
+        d.zoomInBtn?.addEventListener("click", () => setZoom(zoomLevel * 1.35));
+        d.zoomOutBtn?.addEventListener("click", () => setZoom(zoomLevel / 1.35));
+        d.zoomResetBtn?.addEventListener("click", resetViewport);
 
         document.addEventListener("keydown", (e) => {
             if (!document.getElementById("labeling-panel")?.classList.contains("active")) return;
@@ -980,11 +1164,28 @@
                 setTool("brush");
             } else if (e.key.toLowerCase() === "e") {
                 setTool("eraser");
+            } else if (e.key.toLowerCase() === "p") {
+                setTool("pan");
             }
         });
 
         const labelingTab = document.getElementById("labeling-tab");
-        labelingTab?.addEventListener("click", ensureDatasetsLoaded);
+        labelingTab?.addEventListener("click", () => {
+            if (selectedStudioFruit()) ensureDatasetsLoaded();
+        });
+        document.getElementById("fruit-select")?.addEventListener("change", () => {
+            datasetsLoaded = false;
+            currentDatasetId = null;
+            currentImageId = null;
+            images = [];
+            if (d.datasetSelect) d.datasetSelect.innerHTML = "";
+            renderQueue();
+            renderModelPlan(null);
+            clearCanvas();
+            if (selectedStudioFruit() !== "other" && document.getElementById("labeling-panel")?.classList.contains("active")) {
+                ensureDatasetsLoaded();
+            }
+        });
 
         renderLayerButtons();
         renderQa(null);

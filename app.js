@@ -82,9 +82,13 @@ function setLastUpdatedStamp() {
 
 function activateTab(targetId) {
     const analysisTarget = targetId === "single-panel" || targetId === "bulk-panel";
+    const labelingTarget = targetId === "labeling-panel";
     if (analysisTarget && !wizardCompleted) {
         targetId = "settings-panel";
         showWizardStep(wizardStep || 1);
+    } else if (labelingTarget && !selectedFruit()) {
+        targetId = "settings-panel";
+        showWizardStep(1);
     } else if (analysisTarget) {
         analysisTabsClicked = true;
     }
@@ -518,6 +522,7 @@ function rebuildFruitOptions(experts) {
     if (previous && (knownFruitTypes.has(previous.toLowerCase()) || previous === "other")) {
         select.value = previous;
     }
+    updateAnalysisTabAvailability();
 }
 
 window.refreshExperts = function () { return loadExperts(); };
@@ -640,6 +645,7 @@ function setupAnalysisSettingsControls() {
     });
     document.getElementById("fruit-select")?.addEventListener("change", (event) => {
         const value = event.target.value;
+        updateAnalysisTabAvailability();
         if (value === "other") {
             event.target.classList.remove("input-error");
             document.getElementById("fruit-select-status")?.classList.remove("visible");
@@ -680,6 +686,13 @@ function updateAnalysisTabAvailability() {
         button.classList.toggle("setup-ready-highlight", ready && !analysisTabsClicked);
         button.setAttribute("aria-disabled", ready ? "false" : "true");
     });
+    const labelingButton = document.getElementById("labeling-tab");
+    if (labelingButton) {
+        const labelingReady = Boolean(selectedFruit());
+        labelingButton.classList.toggle("setup-locked", !labelingReady);
+        labelingButton.setAttribute("aria-disabled", labelingReady ? "false" : "true");
+        labelingButton.title = labelingReady ? "" : "Select a fruit type on the Main tab first.";
+    }
 }
 
 function wizardStepElements() {
@@ -3914,14 +3927,20 @@ function startQueuePolling() {
             
             const active = data.active_requests || 0;
             const max = data.max_concurrent || 2;
+            const coresInUse = Number.isFinite(Number(data.cores_in_use))
+                ? Math.max(0, Math.min(max, Number(data.cores_in_use)))
+                : Math.min(active, max);
+            const queued = Number.isFinite(Number(data.queued_requests))
+                ? Math.max(0, Number(data.queued_requests))
+                : Math.max(0, active - max);
             
-            if (active < max) {
-                statusDiv.innerHTML = `Server Ready | <strong>${envName}</strong> (Cores in use: ${active}/${max})`;
+            if (coresInUse < max && queued === 0) {
+                statusDiv.innerHTML = `Server Ready | <strong>${envName}</strong> (Cores in use: ${coresInUse}/${max})`;
                 statusDiv.style.color = "#155724";
                 statusDiv.style.backgroundColor = "#d4edda";
             } else {
-                const queued = active - max;
-                statusDiv.innerHTML = `Processing | <strong>${envName}</strong> (Cores in use: ${max}/${max}) - ${queued} in queue`;
+                const queueText = queued > 0 ? ` - ${queued} in queue` : "";
+                statusDiv.innerHTML = `Processing | <strong>${envName}</strong> (Cores in use: ${coresInUse}/${max})${queueText}`;
                 statusDiv.style.color = "#856404";
                 statusDiv.style.backgroundColor = "#fff3cd";
             }

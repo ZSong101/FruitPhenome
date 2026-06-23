@@ -248,6 +248,12 @@
     .studio-job.visible { display: block; }
     .studio-job-bar { height: 8px; border-radius: 999px; overflow: hidden; background: #e3eaf0; margin-top: 8px; }
     .studio-job-fill { height: 100%; width: 0%; background: #146c43; transition: width 0.25s ease; }
+    .studio-model-plan { margin: -6px 0 16px; padding: 10px 12px; border-left: 4px solid #4b84b4; background: #f3f8fc; color: #29495f; font-size: 13px; line-height: 1.4; }
+    .studio-augment-preview-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .studio-augment-preview-actions button { min-height: 36px; padding: 7px 12px; border: 1px solid #b9c3cc; border-radius: 6px; background: #eef1f4; color: #1e2a32; font-weight: 700; cursor: pointer; }
+    .studio-augment-preview { display: none; margin-top: 12px; }
+    .studio-augment-preview.visible { display: block; }
+    .studio-augment-preview img { display: block; width: min(100%, 920px); height: auto; border: 1px solid #c9d4dc; border-radius: 6px; cursor: zoom-in; }
     .studio-main { display: grid; grid-template-columns: 200px minmax(0, 1fr) 230px; gap: 16px; align-items: start; }
     .studio-queue { border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; padding: 10px; max-height: 640px; overflow: auto; }
     .studio-queue h3, .studio-tools h3 { margin: 0 0 8px; font-size: 15px; }
@@ -261,23 +267,28 @@
     .studio-status-badge.draft { background: #dceeff; color: #23608f; }
     .studio-status-badge.approved { background: #d7f6df; color: #176c34; }
     .studio-canvas-wrap { min-width: 0; }
-    .studio-canvas-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .studio-canvas-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
     .studio-canvas-actions button { min-height: 38px; padding: 8px 14px; border: 1px solid #b9c3cc; border-radius: 6px; background: #eef1f4; color: #1e2a32; font-weight: 700; cursor: pointer; }
     .studio-canvas-actions button:hover:not(:disabled) { background: #e1e6eb; }
     .studio-canvas-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
     #studio-prelabel-btn { background: #146c43; color: #fff; border-color: #146c43; }
     #studio-approve-btn { background: #0b3d91; color: #fff; border-color: #0b3d91; }
-    .studio-canvas-host { position: relative; border: 1px solid #d8e1e8; border-radius: 8px; background: #2b3640; min-height: 320px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-    #studio-canvas { max-width: 100%; touch-action: none; cursor: crosshair; display: block; }
+    .studio-zoom-controls { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+    .studio-zoom-controls button { width: 38px; padding: 0; font-size: 18px; }
+    #studio-zoom-value { min-width: 48px; text-align: center; color: #50616d; font-size: 12px; font-weight: 800; }
+    .studio-canvas-host { position: relative; border: 1px solid #d8e1e8; border-radius: 8px; background: #2b3640; height: min(68vh, 760px); min-height: 380px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #studio-canvas { max-width: 100%; touch-action: none; cursor: crosshair; display: block; transform-origin: center center; will-change: transform; }
+    #studio-canvas.pan-active { cursor: grab; }
+    #studio-canvas.panning { cursor: grabbing; }
     #studio-canvas-empty { color: #cfd8df; }
     .studio-tools { border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; padding: 12px; }
     .studio-tool-group { margin-bottom: 14px; }
     .studio-tool-label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 6px; }
     .studio-layer-buttons { display: grid; gap: 6px; }
-    .studio-layer-btn { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid #c7d0d8; border-radius: 6px; background: #fff; cursor: pointer; font-weight: 700; font-size: 13px; text-align: left; }
+    .studio-layer-btn { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid #c7d0d8; border-radius: 6px; background: #fff; color: #1e2a32; cursor: pointer; font-weight: 700; font-size: 13px; text-align: left; }
     .studio-layer-btn .swatch { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,0.2); }
     .studio-layer-btn.active { border-color: #1e2a32; box-shadow: inset 0 0 0 1px #1e2a32; }
-    .studio-tool-btn { padding: 7px 12px; border: 1px solid #c7d0d8; border-radius: 6px; background: #fff; cursor: pointer; font-weight: 700; margin-right: 6px; }
+    .studio-tool-btn { padding: 7px 12px; border: 1px solid #c7d0d8; border-radius: 6px; background: #fff; color: #1e2a32; cursor: pointer; font-weight: 700; margin: 0 4px 6px 0; }
     .studio-tool-btn.active { background: #1e2a32; color: #fff; border-color: #1e2a32; }
     .studio-tool-group input[type="range"] { width: 100%; }
     .studio-qa { font-size: 12.5px; line-height: 1.4; }
@@ -640,17 +651,18 @@
         <label for="studio-dataset-select">Dataset
           <select id="studio-dataset-select"></select>
         </label>
-        <button id="studio-new-dataset-btn" type="button">+ New</button>
         <label for="studio-upload-input">Upload images
           <input id="studio-upload-input" type="file" multiple accept=".jpg,.jpeg,.png">
         </label>
-        <button id="studio-export-btn" type="button">Export ZIP</button>
-        <button id="studio-augment-export-btn" type="button">Augment export</button>
+        <button id="studio-export-btn" type="button" title="Download approved source images and their YOLO segmentation labels without generated augmentations.">Export ZIP</button>
+        <button id="studio-augment-export-btn" type="button" title="Generate and download an expanded train/validation bundle using the augmentation settings below.">Augment export</button>
         <button id="studio-finetune-btn" type="button" title="Train the model on the corrected masks in this dataset. Balanced across the latent space to avoid bias.">Fine-tune from corrections</button>
         <span id="studio-status" class="muted" role="status"></span>
       </div>
+      <div id="studio-model-plan" class="studio-model-plan">Select a dataset to see which model will be fine-tuned or copied.</div>
       <details class="studio-augment-options">
         <summary>Augmented export options</summary>
+        <p class="muted">These settings generate transformed training copies from approved masks. Preview uses the same augmentation pipeline at a smaller display resolution; export retains the configured training resolution.</p>
         <div class="studio-augment-grid">
           <label for="studio-aug-count">Random augs / image
             <input id="studio-aug-count" type="number" min="0" max="80" value="12">
@@ -669,6 +681,11 @@
             Include fixed notebook augmentations
           </label>
         </div>
+        <div class="studio-augment-preview-actions">
+          <button id="studio-augment-preview-btn" type="button">Preview augmentations</button>
+          <span id="studio-augment-preview-status" class="muted" role="status"></span>
+        </div>
+        <div id="studio-augment-preview" class="studio-augment-preview"></div>
       </details>
       <div id="studio-aug-job" class="studio-job">
         <div id="studio-aug-job-text" class="muted">Augmentation queued.</div>
@@ -692,6 +709,12 @@
             <button id="studio-redo-btn" type="button">Redo</button>
             <button id="studio-save-btn" type="button">Save</button>
             <button id="studio-approve-btn" type="button">Approve &amp; Next</button>
+            <span class="studio-zoom-controls">
+              <button id="studio-zoom-out-btn" type="button" title="Zoom out" aria-label="Zoom out">&minus;</button>
+              <span id="studio-zoom-value">100%</span>
+              <button id="studio-zoom-in-btn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+              <button id="studio-zoom-reset-btn" type="button" title="Reset zoom and pan" aria-label="Reset zoom and pan">&#8634;</button>
+            </span>
           </div>
           <div id="studio-canvas-host" class="studio-canvas-host">
             <canvas id="studio-canvas" width="0" height="0"></canvas>
@@ -709,13 +732,14 @@
             <span class="studio-tool-label">Tool</span>
             <button id="studio-brush-btn" type="button" class="studio-tool-btn active">Brush</button>
             <button id="studio-eraser-btn" type="button" class="studio-tool-btn">Eraser</button>
+            <button id="studio-pan-btn" type="button" class="studio-tool-btn">Pan</button>
           </div>
           <div class="studio-tool-group">
             <label for="studio-brush-size">Brush size <span id="studio-brush-size-val">40</span> px</label>
             <input id="studio-brush-size" type="range" min="3" max="250" value="40">
           </div>
           <div class="studio-tool-group">
-            <label for="studio-opacity">Overlay opacity <span id="studio-opacity-val">55</span>%</label>
+            <label for="studio-opacity">Selected mask opacity <span id="studio-opacity-val">55</span>%</label>
             <input id="studio-opacity" type="range" min="10" max="100" value="55">
           </div>
           <div class="studio-tool-group">
