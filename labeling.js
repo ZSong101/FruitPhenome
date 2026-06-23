@@ -31,7 +31,8 @@
     let displayScale = 1;
     const layerCanvas = {};        // layer -> offscreen canvas (image resolution, colored)
     let activeLayer = "whole";
-    let tool = "brush";            // "brush" | "eraser" | "pan"
+    let tool = "brush";            // "brush" | "eraser"
+    let panMode = false;
     let brushSize = 40;
     const layerOpacity = { whole: 0.55, flesh_left: 0.55, flesh_right: 0.55 };
     let zoomLevel = 1;
@@ -89,7 +90,6 @@
             layerButtons: el("studio-layer-buttons"),
             brushBtn: el("studio-brush-btn"),
             eraserBtn: el("studio-eraser-btn"),
-            panBtn: el("studio-pan-btn"),
             brushSize: el("studio-brush-size"),
             brushSizeVal: el("studio-brush-size-val"),
             opacity: el("studio-opacity"),
@@ -260,7 +260,8 @@
     async function loadTrainingTarget() {
         if (!currentDatasetId) return;
         try {
-            const data = await apiGetJson(`/${currentDatasetId}/training_target`);
+            const selectedExpert = document.getElementById("model-version-select")?.value || "";
+            const data = await apiGetJson(`/${currentDatasetId}/training_target?expert_id=${encodeURIComponent(selectedExpert)}`);
             if (!data.success) throw new Error(data.message || "Could not resolve model.");
             renderModelPlan(data);
         } catch (err) {
@@ -538,7 +539,7 @@
             if (d.finetuneBtn) d.finetuneBtn.disabled = true;
             setStatus("Starting fine-tune from corrections...");
             const body = {
-                expert_id: opts.expertId || "auto",
+                expert_id: opts.expertId || document.getElementById("model-version-select")?.value || "auto",
                 dataset_ids: [datasetId],
                 fruit_type: opts.fruitType || null,
                 password: currentPassword,
@@ -679,7 +680,7 @@
         const d = dom();
         if (!d.canvas) return;
         d.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
-        d.canvas.classList.toggle("pan-active", tool === "pan");
+        d.canvas.classList.toggle("pan-active", panMode);
         d.canvas.classList.toggle("panning", panning);
         if (d.zoomValue) d.zoomValue.innerText = `${Math.round(zoomLevel * 100)}%`;
     }
@@ -698,6 +699,7 @@
         zoomLevel = 1;
         panX = 0;
         panY = 0;
+        panMode = false;
         panning = false;
         panStart = null;
         applyViewportTransform();
@@ -763,7 +765,7 @@
     }
 
     function beginStroke(event) {
-        if (!baseImage || tool === "pan") return;
+        if (!baseImage || panMode) return;
         painting = true;
         const lctx = layerCanvas[activeLayer].getContext("2d");
         strokeBefore = lctx.getImageData(0, 0, imgW, imgH);
@@ -891,6 +893,7 @@
         try {
             setStatus("Running model pre-label...");
             const formData = new FormData();
+            formData.append("expert_id", document.getElementById("model-version-select")?.value || "");
             const data = await apiSendForm(`/${currentDatasetId}/images/${currentImageId}/prelabel`, "POST", formData);
             if (!data.success) throw new Error(data.message || "Pre-label failed.");
             LAYERS.forEach((layer) => { layerCanvas[layer] = newLayerCanvas(); });
@@ -986,10 +989,10 @@
 
     function setTool(next) {
         tool = next;
+        panMode = false;
         const d = dom();
         d.brushBtn.classList.toggle("active", tool === "brush");
         d.eraserBtn.classList.toggle("active", tool === "eraser");
-        d.panBtn.classList.toggle("active", tool === "pan");
         applyViewportTransform();
     }
 
@@ -1114,7 +1117,6 @@
 
         d.brushBtn?.addEventListener("click", () => setTool("brush"));
         d.eraserBtn?.addEventListener("click", () => setTool("eraser"));
-        d.panBtn?.addEventListener("click", () => setTool("pan"));
         d.layerButtons?.addEventListener("click", (e) => {
             const btn = e.target.closest(".studio-layer-btn");
             if (btn && btn.dataset.layer) setActiveLayer(btn.dataset.layer);
@@ -1133,20 +1135,28 @@
 
         d.canvas.addEventListener("pointerdown", (e) => {
             d.canvas.setPointerCapture(e.pointerId);
-            if (tool === "pan" || e.button === 1) beginPan(e);
+            if (panMode || e.button === 2) beginPan(e);
             else beginStroke(e);
         });
         d.canvas.addEventListener("pointermove", moveStroke);
         d.canvas.addEventListener("pointerup", () => { endStroke(); endPan(); });
         d.canvas.addEventListener("pointerleave", () => { hoverPt = null; composite(); });
+        d.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+        d.canvas.addEventListener("dblclick", (e) => {
+            e.preventDefault();
+            if (!baseImage || zoomLevel <= 1) return;
+            panMode = !panMode;
+            setStatus(panMode ? "Pan mode on. Drag the image; double-click again to return to painting." : "Pan mode off.");
+            applyViewportTransform();
+        });
         window.addEventListener("pointerup", () => { endStroke(); endPan(); });
         d.canvasHost?.addEventListener("wheel", (e) => {
             if (!baseImage) return;
             e.preventDefault();
-            setZoom(zoomLevel * (e.deltaY < 0 ? 1.18 : 0.85));
+            setZoom(zoomLevel * (e.deltaY < 0 ? 1.08 : 0.93));
         }, { passive: false });
-        d.zoomInBtn?.addEventListener("click", () => setZoom(zoomLevel * 1.35));
-        d.zoomOutBtn?.addEventListener("click", () => setZoom(zoomLevel / 1.35));
+        d.zoomInBtn?.addEventListener("click", () => setZoom(zoomLevel * 1.2));
+        d.zoomOutBtn?.addEventListener("click", () => setZoom(zoomLevel / 1.2));
         d.zoomResetBtn?.addEventListener("click", resetViewport);
 
         document.addEventListener("keydown", (e) => {
@@ -1164,8 +1174,6 @@
                 setTool("brush");
             } else if (e.key.toLowerCase() === "e") {
                 setTool("eraser");
-            } else if (e.key.toLowerCase() === "p") {
-                setTool("pan");
             }
         });
 
@@ -1185,6 +1193,9 @@
             if (selectedStudioFruit() !== "other" && document.getElementById("labeling-panel")?.classList.contains("active")) {
                 ensureDatasetsLoaded();
             }
+        });
+        document.getElementById("model-version-select")?.addEventListener("change", () => {
+            if (currentDatasetId) loadTrainingTarget();
         });
 
         renderLayerButtons();

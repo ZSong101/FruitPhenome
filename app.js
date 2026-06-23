@@ -33,6 +33,10 @@ function batchStageUrl() {
     return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_batch_stage" : "batch_stage"}`;
 }
 
+function processJobsUrl(rest = "") {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_process_jobs" : "process_jobs"}${rest}`;
+}
+
 function previewUrlBase() {
     return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_preview" : "preview"}`;
 }
@@ -371,7 +375,8 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
         }
         
         startQueuePolling(); // Boot up the live dashboard
-        loadExperts(); // Populate the fruit dropdown from the trained-expert registry
+        await loadExperts(); // Populate the fruit dropdown from the trained-expert registry
+        await restoreLatestPersistentJob();
     } else {
         errorDiv.innerText = "Incorrect password.";
     }
@@ -486,6 +491,7 @@ function selectedFruit() {
 // watermelon so validation works before /experts loads; refreshed after login
 // and after onboarding a new fruit.
 let knownFruitTypes = new Set(["watermelon"]);
+let knownExperts = [];
 
 function isKnownFruit(value) {
     return knownFruitTypes.has(String(value || "").trim().toLowerCase());
@@ -500,6 +506,7 @@ function rebuildFruitOptions(experts) {
     if (!select) return;
     const previous = select.value;
     const trained = Array.isArray(experts) ? experts : [];
+    knownExperts = trained.slice();
     knownFruitTypes = new Set(trained.map(e => String(e.fruit_type || "").trim().toLowerCase()).filter(Boolean));
     if (knownFruitTypes.size === 0) knownFruitTypes.add("watermelon");
 
@@ -523,6 +530,24 @@ function rebuildFruitOptions(experts) {
         select.value = previous;
     }
     updateAnalysisTabAvailability();
+    rebuildModelVersionOptions(select.value);
+}
+
+function rebuildModelVersionOptions(fruitType = selectedFruit()) {
+    const row = document.getElementById("model-version-row");
+    const select = document.getElementById("model-version-select");
+    if (!row || !select) return;
+    const fruit = String(fruitType || "").trim().toLowerCase();
+    const versions = knownExperts
+        .filter(expert => String(expert.fruit_type || "").trim().toLowerCase() === fruit)
+        .sort((a, b) => Number(b.version || 0) - Number(a.version || 0));
+    row.style.display = versions.length ? "block" : "none";
+    select.innerHTML = versions.map(expert => {
+        const suffix = expert.is_default ? " (latest/default)" : " (archived)";
+        return `<option value="${escapeHtml(expert.id)}">${escapeHtml(`v${expert.version}${suffix}`)}</option>`;
+    }).join("");
+    const defaultExpert = versions.find(expert => expert.is_default) || versions[0];
+    if (defaultExpert) select.value = defaultExpert.id;
 }
 
 window.refreshExperts = function () { return loadExperts(); };
@@ -562,6 +587,7 @@ function requireWalkthroughComplete(statusEl) {
 function getAnalysisSettingsSnapshot() {
     return {
         fruit: selectedFruit(),
+        expertId: document.getElementById("model-version-select")?.value || "",
         readLabels: checkboxChecked("read-labels-input", false),
         readQr: checkboxChecked("read-qr-input", false),
         useColorChecker: checkboxChecked("use-color-checker-input", true),
@@ -580,6 +606,7 @@ function getAnalysisSettingsSnapshot() {
 function appendAnalysisSettings(formData, settings) {
     const snapshot = settings || getAnalysisSettingsSnapshot();
     formData.append("fruit_type", snapshot.fruit || "");
+    formData.append("expert_id", snapshot.expertId || "");
     formData.append("read_labels", snapshot.readLabels ? "true" : "false");
     formData.append("read_qr", snapshot.readQr ? "true" : "false");
     formData.append("use_color_checker", snapshot.useColorChecker ? "true" : "false");
@@ -646,6 +673,7 @@ function setupAnalysisSettingsControls() {
     document.getElementById("fruit-select")?.addEventListener("change", (event) => {
         const value = event.target.value;
         updateAnalysisTabAvailability();
+        rebuildModelVersionOptions(value);
         if (value === "other") {
             event.target.classList.remove("input-error");
             document.getElementById("fruit-select-status")?.classList.remove("visible");
@@ -1770,6 +1798,7 @@ function previewFetchUrl(data, previewType, size = "thumb") {
     if (!data.preview_refs?.[previewType]?.available) return "";
     const params = new URLSearchParams({
         username: currentUsername,
+        password: currentPassword,
         size,
         _t: String(data.updated_at || "")
     });
@@ -2338,6 +2367,7 @@ let globalBatchResults = []; // Stores all row data for dynamic toggling
 let activeBatch = null;
 let activeSingleRun = null;
 let batchRunCounter = 0;
+let persistentJobPollId = null;
 const BATCH_PAUSE_MS = 50;
 const BATCH_WARMUP_COUNT = 2;
 const VIRTUAL_TABLE_THRESHOLD = 80;
@@ -2431,6 +2461,240 @@ function makeBatchState(files, settings, requestLineOcr) {
         stopRequested: false,
         stopReason: null
     };
+}
+
+function persistentRowItem(row) {
+    const data = row.result || {
+        filename: row.filename,
+        row_id: row.row_id,
+        warnings: row.message ? [row.message] : []
+    };
+    if (row.result) {
+        const item = batchResultItem({ name: row.filename }, data);
+        item.success = data.success !== false;
+        item.included = data.success !== false;
+        if (!item.success) {
+            item.message = `Error: ${data.message || row.message || "Processing failed"}`;
+            item.notes = [item.message, rowNotes(data)].filter(Boolean).join(" | ");
+            item.allowPixelMetrics = false;
+        }
+        return item;
+    }
+    return {
+        file_name: row.filename,
+        data,
+        included: false,
+        isCm: false,
+        allowPixelMetrics: false,
+        digits: 0,
+        notes: row.message || "Queued.",
+        success: false,
+        retrying: true,
+        message: row.status === "processing" ? "Processing..." : "Queued..."
+    };
+}
+
+function applyPersistentJob(job, { restored = false } = {}) {
+    if (!job) return;
+    const rows = job.rows || [];
+    const priorByRow = new Map(globalBatchResults.map(item => [item.data?.row_id, item]));
+    const batch = activeBatch?.persistentJobId === job.job_id
+        ? activeBatch
+        : makeBatchState(rows.map(row => ({ name: row.filename })), job.settings || {}, false);
+    batch.id = job.job_id;
+    batch.persistentJobId = job.job_id;
+    batch.sessionId = job.session_id || job.job_id;
+    batch.files = rows.map(row => ({ name: row.filename }));
+    batch.rowIds = rows.map(row => row.row_id);
+    batch.completed = Number(job.completed || 0);
+    batch.nextIndex = batch.completed;
+    batch.successCount = Number(job.success_count || 0);
+    batch.failureCount = Number(job.failure_count || 0);
+    batch.elapsedMs = Number(job.elapsed_ms || 0);
+    batch.running = ["queued", "running", "stopping"].includes(job.status);
+    batch.finished = job.status === "completed";
+    batch.stopRequested = job.status === "stopping";
+    activeBatch = batch;
+    currentSessionId = batch.sessionId;
+    if (job.settings?.fruit) {
+        const fruitSelect = document.getElementById("fruit-select");
+        if (fruitSelect && [...fruitSelect.options].some(option => option.value === job.settings.fruit)) {
+            fruitSelect.value = job.settings.fruit;
+            rebuildModelVersionOptions(job.settings.fruit);
+            const versionSelect = document.getElementById("model-version-select");
+            if (versionSelect && job.settings.expertId && [...versionSelect.options].some(option => option.value === job.settings.expertId)) {
+                versionSelect.value = job.settings.expertId;
+            }
+            wizardCompleted = true;
+            updateAnalysisTabAvailability();
+        }
+    }
+    globalBatchResults = rows.map(row => {
+        const item = persistentRowItem(row);
+        const prior = priorByRow.get(row.row_id);
+        if (prior && row.result) item.included = prior.included;
+        return item;
+    });
+
+    const table = document.getElementById("bulk-table");
+    const timer = document.getElementById("batch-timer");
+    const status = document.getElementById("bulk-status");
+    const charts = document.getElementById("histograms-container");
+    if (table) table.style.display = "table";
+    document.getElementById("bulk-section")?.classList.add("bulk-card");
+    if (timer) {
+        timer.style.display = "block";
+        const remaining = Math.max(rows.length - batch.completed, 0);
+        const eta = batch.completed > 0 ? (batch.elapsedMs / batch.completed) * remaining : null;
+        timer.innerText = batch.running
+            ? `Elapsed: ${formatDuration(batch.elapsedMs)} | ETA: ${eta === null ? "Calculating..." : formatDuration(eta)}`
+            : `Total Time: ${formatDuration(batch.elapsedMs)}`;
+    }
+    if (status) {
+        const prefix = restored ? "Restored persistent job. " : "";
+        status.innerText = `${prefix}${job.message || `Job ${job.status}.`}`;
+    }
+    updateBatchControls(batch);
+    updateBatchProgress(batch);
+    refreshBatchOutputs(charts, { debounceHistograms: batch.running });
+    updateBatchJumpControls();
+    if (restored) activateTab("bulk-panel");
+}
+
+async function fetchPersistentJob(jobId) {
+    const params = new URLSearchParams({
+        username: currentUsername,
+        password: currentPassword,
+        _t: Date.now().toString()
+    });
+    const response = await fetch(`${processJobsUrl(`/${encodeURIComponent(jobId)}`)}?${params}`, { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+    return data.job;
+}
+
+function startPersistentJobPolling(jobId) {
+    if (persistentJobPollId) clearInterval(persistentJobPollId);
+    const poll = async () => {
+        try {
+            const job = await fetchPersistentJob(jobId);
+            applyPersistentJob(job);
+            if (["completed", "stopped", "failed"].includes(job.status)) {
+                clearInterval(persistentJobPollId);
+                persistentJobPollId = null;
+                refreshSavedJobSelector(job.job_id).catch(() => {});
+            }
+        } catch (err) {
+            console.warn("Could not refresh persistent processing job.", err);
+        }
+    };
+    poll();
+    persistentJobPollId = setInterval(poll, 2500);
+}
+
+async function createPersistentBatchJob(files, settings) {
+    const fileList = Array.from(files);
+    const initResponse = await fetch(processJobsUrl("/init"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            password: currentPassword,
+            username: currentUsername,
+            filenames: fileList.map(file => file.name),
+            settings,
+            requested_columns: selectedColumnIdsForRequest(),
+            preview_types: selectedPreviewIds()
+        })
+    });
+    const initData = await initResponse.json();
+    if (!initResponse.ok || initData.success === false) throw new Error(initData.message || `HTTP ${initResponse.status}`);
+    const job = initData.job;
+    const rows = job.rows || [];
+    const chunkSize = 8;
+    for (let start = 0; start < fileList.length; start += chunkSize) {
+        const chunkFiles = fileList.slice(start, start + chunkSize);
+        const chunkRows = rows.slice(start, start + chunkSize);
+        const form = new FormData();
+        form.append("password", currentPassword);
+        form.append("username", currentUsername);
+        form.append("row_ids", JSON.stringify(chunkRows.map(row => row.row_id)));
+        chunkFiles.forEach(file => form.append("files", file));
+        const uploadResponse = await fetch(processJobsUrl(`/${encodeURIComponent(job.job_id)}/files`), {
+            method: "POST",
+            body: form
+        });
+        const uploadData = await uploadResponse.json();
+        if (!uploadResponse.ok || uploadData.success === false) {
+            throw new Error(uploadData.message || `Upload failed (${uploadResponse.status})`);
+        }
+        const status = document.getElementById("bulk-status");
+        if (status) status.innerText = `Uploading batch to persistent storage: ${Math.min(start + chunkFiles.length, fileList.length)}/${fileList.length}`;
+        setProgressBar("bulk-progress", Math.min(start + chunkFiles.length, fileList.length) / fileList.length, { visible: true });
+    }
+    const startResponse = await fetch(processJobsUrl(`/${encodeURIComponent(job.job_id)}/start`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: currentPassword, username: currentUsername })
+    });
+    const startData = await startResponse.json();
+    if (!startResponse.ok || startData.success === false) throw new Error(startData.message || `HTTP ${startResponse.status}`);
+    applyPersistentJob(startData.job);
+    await refreshSavedJobSelector(job.job_id);
+    startPersistentJobPolling(job.job_id);
+}
+
+async function refreshSavedJobSelector(selectedJobId = "") {
+    const select = document.getElementById("saved-job-select");
+    if (!currentUsername || !currentPassword) return [];
+    const params = new URLSearchParams({
+        username: currentUsername,
+        password: currentPassword,
+        _t: Date.now().toString()
+    });
+    const response = await fetch(`${processJobsUrl()}?${params}`, { cache: "no-store" });
+    const data = await response.json();
+    const jobs = data.success && Array.isArray(data.jobs) ? data.jobs : [];
+    if (select) {
+        select.innerHTML = jobs.length
+            ? jobs.map(job => {
+                const created = job.created_at ? new Date(job.created_at).toLocaleString() : job.job_id;
+                const label = `${created} · ${job.status} · ${job.completed || 0}/${job.row_count || 0}`;
+                return `<option value="${escapeHtml(job.job_id)}">${escapeHtml(label)}</option>`;
+            }).join("")
+            : `<option value="">No saved jobs</option>`;
+        const target = selectedJobId || activeBatch?.persistentJobId || jobs[0]?.job_id || "";
+        if (target) select.value = target;
+    }
+    return jobs;
+}
+
+async function restoreLatestPersistentJob() {
+    if (!currentUsername || !currentPassword) return;
+    try {
+        const jobs = await refreshSavedJobSelector();
+        const latest = jobs[0];
+        if (!latest) return;
+        const job = await fetchPersistentJob(latest.job_id);
+        applyPersistentJob(job, { restored: true });
+        if (["queued", "running", "stopping"].includes(job.status)) {
+            startPersistentJobPolling(job.job_id);
+        }
+    } catch (err) {
+        console.warn("Could not restore persistent processing history.", err);
+    }
+}
+
+async function controlPersistentJob(action) {
+    if (!activeBatch?.persistentJobId) return false;
+    const response = await fetch(processJobsUrl(`/${encodeURIComponent(activeBatch.persistentJobId)}/${action}`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: currentUsername, password: currentPassword })
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+    startPersistentJobPolling(activeBatch.persistentJobId);
+    return true;
 }
 
 function batchRowId(batch, index, file) {
@@ -3563,16 +3827,15 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     const status = document.getElementById("bulk-status");
     if (!requireWalkthroughComplete(status)) return;
 
-    stopActiveBatch("replaced");
+    if (activeBatch?.running) {
+        status.innerText = "Stop the current persistent job before starting another batch.";
+        return;
+    }
 
     const table = document.getElementById("bulk-table");
     const chartsContainer = document.getElementById("histograms-container");
     const timerDiv = document.getElementById("batch-timer");
     const batchSettings = getAnalysisSettingsSnapshot();
-    const batch = makeBatchState(files, batchSettings, shouldRequestLineOcr(selectedPreviewIds(), batchSettings));
-    activeBatch = batch;
-    updateAnalysisSettingsLock();
-
     chartsContainer.innerHTML = "";
     table.style.display = "table";
     document.getElementById("bulk-section").classList.add("bulk-card");
@@ -3585,22 +3848,55 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     globalBatchResults = [];
     renderBulkTable();
     updateBatchJumpControls();
-    await runBatch(batch);
+    status.innerText = "Uploading batch to persistent backend storage...";
+    try {
+        await createPersistentBatchJob(files, batchSettings);
+    } catch (err) {
+        status.innerText = `Could not create persistent processing job: ${err.message}`;
+        setProgressBar("bulk-progress", 0, { visible: false });
+    }
 });
 
-document.getElementById("stop-batch-btn").addEventListener("click", () => {
+document.getElementById("stop-batch-btn").addEventListener("click", async () => {
     const stopBtn = document.getElementById("stop-batch-btn");
     if (!requireSecondStopClick(stopBtn)) return;
     resetStopConfirmation(stopBtn);
+    if (activeBatch?.persistentJobId) {
+        try {
+            await controlPersistentJob("stop");
+        } catch (err) {
+            document.getElementById("bulk-status").innerText = `Stop failed: ${err.message}`;
+        }
+        return;
+    }
     stopActiveBatch("stopped");
 });
 
 document.getElementById("resume-batch-btn").addEventListener("click", async () => {
     if (!activeBatch || activeBatch.running || activeBatch.finished) return;
+    if (activeBatch.persistentJobId) {
+        try {
+            await controlPersistentJob("resume");
+        } catch (err) {
+            document.getElementById("bulk-status").innerText = `Resume failed: ${err.message}`;
+        }
+        return;
+    }
     await runBatch(activeBatch);
 });
 
 document.getElementById("flush-dev-queue-btn")?.addEventListener("click", flushDevQueue);
+document.getElementById("saved-job-select")?.addEventListener("change", async (event) => {
+    const jobId = event.target.value;
+    if (!jobId) return;
+    try {
+        const job = await fetchPersistentJob(jobId);
+        applyPersistentJob(job, { restored: true });
+        if (["queued", "running", "stopping"].includes(job.status)) startPersistentJobPolling(job.job_id);
+    } catch (err) {
+        document.getElementById("bulk-status").innerText = `Could not restore saved job: ${err.message}`;
+    }
+});
 
 // --- ROW TOGGLE LISTENER ---
 // Listen to the table body. If a checkbox is clicked, update state and instantly rebuild histograms.
@@ -3903,7 +4199,8 @@ function clearPreviewSessionBeacon() {
     navigator.sendBeacon?.(clearSessionUrl(), blob);
 }
 
-window.addEventListener("pagehide", clearPreviewSessionBeacon);
+// Persistent processing sessions are retained server-side across refreshes,
+// browser closure, and device changes. They are no longer cleared on pagehide.
 
 // --- LIVE QUEUE POLLING ---
 function startQueuePolling() {

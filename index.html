@@ -80,6 +80,9 @@
     .column-dragging { opacity: 0.45; }
     .column-drop-target { outline: 2px solid #1170ff; outline-offset: -2px; background: #eaf2ff !important; }
     .analysis-toolbar, .bulk-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px; }
+    .saved-job-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; color: #425563; font-size: 13px; }
+    .saved-job-row label { font-weight: 700; }
+    .saved-job-row select { min-width: min(100%, 360px); max-width: 100%; }
     .toolbar-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-left: auto; }
     .column-dropdown { position: relative; display: inline-flex; align-items: center; }
     .bulk-toolbar button, .single-toolbar button, .settings-column-toolbar button, .analysis-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
@@ -142,6 +145,8 @@
     .settings-panel #main-column-menu-panel .column-group-checkbox,
     .settings-panel #main-column-menu-panel .column-checkbox { width: auto; height: auto; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 3px; }
     .fruit-select-card select { max-width: 360px; }
+    .model-version-row { margin-top: 12px; max-width: 360px; }
+    .model-version-row select { width: 100%; }
     .fruit-select-card select.input-error { border-color: #c7362f; box-shadow: 0 0 0 3px rgba(199, 54, 47, 0.12); }
     .fruit-workflow-hint { margin: 10px 0 0; max-width: 760px; color: #5b6470; line-height: 1.45; }
     .fruit-select-message { display: none; color: #c7362f; margin: 8px 0 0; }
@@ -228,7 +233,9 @@
     }
 
     /* --- LABELING STUDIO --- */
-    .studio-toolbar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 12px 0 18px; }
+    .studio-toolbar { display: grid; gap: 10px; margin: 12px 0 18px; }
+    .studio-toolbar-primary, .studio-toolbar-actions { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+    .studio-toolbar-actions { padding-top: 10px; border-top: 1px solid #d8e1e8; }
     .studio-toolbar label { display: inline-flex; flex-direction: column; gap: 4px; font-weight: 700; font-size: 13px; }
     .studio-toolbar select, .studio-toolbar input[type="file"] { font-size: 14px; }
     .studio-toolbar button { min-height: 38px; padding: 8px 14px; border: 1px solid #b9c3cc; border-radius: 6px; background: #eef1f4; color: #1e2a32; font-weight: 700; cursor: pointer; }
@@ -241,6 +248,7 @@
     .studio-augment-options summary { cursor: pointer; font-weight: 800; color: #1f3545; }
     .studio-augment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 14px; margin-top: 10px; align-items: end; }
     .studio-augment-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+    .studio-augment-label-text { display: inline-flex; align-items: center; gap: 5px; }
     .studio-augment-grid input { padding: 7px 8px; border: 1px solid #c8d1d8; border-radius: 5px; font-size: 14px; }
     .studio-augment-check { flex-direction: row !important; align-items: center; gap: 8px !important; }
     .studio-augment-check input { width: auto; }
@@ -349,6 +357,12 @@
             <option value="bell_pepper" disabled>Bell Pepper (Under Construction)</option>
             <option value="bell_pepper" disabled>Other (requires minimal manual masking) (Under Construction)</option>
           </select>
+          <div id="model-version-row" class="model-version-row" style="display:none;">
+            <label for="model-version-select" class="setting-label">Model Version
+              <span class="column-help-icon" title="The latest promoted model is selected by default for everyone. Choose an older archived version when you need to reproduce or compare earlier results.">?</span>
+            </label>
+            <select id="model-version-select"></select>
+          </div>
           <p class="fruit-workflow-hint">This walkthrough configures your analysis step by step: select a fruit type, answer a few questions about your images, then review your setup. Once finished, move to Single Image Analysis or Bulk Image Analysis to schedule a processing job. See the Help section at the bottom of this page for explanations of each feature.</p>
           <p id="fruit-select-status" class="fruit-select-message">Select Fruit is required before continuing.</p>
         </div>
@@ -603,6 +617,13 @@
         <input type="file" id="bulk-files" multiple accept=".jpg,.jpeg,.png" required>
       </form>
       <p class="muted supported-file-note">Supported file types: JPG, JPEG, and PNG.</p>
+      <div class="saved-job-row">
+        <label for="saved-job-select">Saved processing job</label>
+        <select id="saved-job-select">
+          <option value="">No saved jobs loaded</option>
+        </select>
+        <span class="column-help-icon" title="Processing jobs and their results are stored under your username. Select a previous job to restore its table, progress, previews, histograms, and CSV outputs on this or another device.">?</span>
+      </div>
       
       <div class="analysis-toolbar bulk-toolbar">
         <div class="column-dropdown">
@@ -648,15 +669,19 @@
       <div id="studio-auth-note" class="status"></div>
 
       <div class="studio-toolbar">
-        <label for="studio-dataset-select">Dataset
-          <select id="studio-dataset-select"></select>
-        </label>
-        <label for="studio-upload-input">Upload images
-          <input id="studio-upload-input" type="file" multiple accept=".jpg,.jpeg,.png">
-        </label>
-        <button id="studio-export-btn" type="button" title="Download approved source images and their YOLO segmentation labels without generated augmentations.">Export ZIP</button>
-        <button id="studio-augment-export-btn" type="button" title="Generate and download an expanded train/validation bundle using the augmentation settings below.">Augment export</button>
-        <button id="studio-finetune-btn" type="button" title="Train the model on the corrected masks in this dataset. Balanced across the latent space to avoid bias.">Fine-tune from corrections</button>
+        <div class="studio-toolbar-primary">
+          <label for="studio-dataset-select">Dataset
+            <select id="studio-dataset-select"></select>
+          </label>
+          <label for="studio-upload-input">Upload images
+            <input id="studio-upload-input" type="file" multiple accept=".jpg,.jpeg,.png">
+          </label>
+        </div>
+        <div class="studio-toolbar-actions">
+          <button id="studio-export-btn" type="button" title="Download approved source images and their YOLO segmentation labels without generated augmentations.">Export ZIP</button>
+          <button id="studio-augment-export-btn" type="button" title="Generate and download an expanded train/validation bundle using the augmentation settings below.">Augment export</button>
+          <button id="studio-finetune-btn" type="button" title="Train the model on the corrected masks in this dataset. Balanced across the latent space to avoid bias.">Fine-tune from corrections</button>
+        </div>
         <span id="studio-status" class="muted" role="status"></span>
       </div>
       <div id="studio-model-plan" class="studio-model-plan">Select a dataset to see which model will be fine-tuned or copied.</div>
@@ -664,21 +689,22 @@
         <summary>Augmented export options</summary>
         <p class="muted">These settings generate transformed training copies from approved masks. Preview uses the same augmentation pipeline at a smaller display resolution; export retains the configured training resolution.</p>
         <div class="studio-augment-grid">
-          <label for="studio-aug-count">Random augs / image
+          <label for="studio-aug-count"><span class="studio-augment-label-text">Random augs / image <span class="column-help-icon" title="Number of randomly generated geometric and photometric variants created from each approved training image, in addition to any fixed augmentations.">?</span></span>
             <input id="studio-aug-count" type="number" min="0" max="80" value="12">
           </label>
-          <label for="studio-bg-prob">Background swap probability
+          <label for="studio-bg-prob"><span class="studio-augment-label-text">Background swap probability <span class="column-help-icon" title="Chance that an augmented training image keeps the labeled fruit but replaces its surrounding background with another sampled background.">?</span></span>
             <input id="studio-bg-prob" type="number" min="0" max="1" step="0.05" value="0.25">
           </label>
-          <label for="studio-val-fraction">Validation fraction
+          <label for="studio-val-fraction"><span class="studio-augment-label-text">Validation fraction <span class="column-help-icon" title="Fraction of approved source images reserved as unaugmented validation examples rather than used for model fitting.">?</span></span>
             <input id="studio-val-fraction" type="number" min="0" max="0.5" step="0.05" value="0.20">
           </label>
-          <label for="studio-aug-seed">Seed
+          <label for="studio-aug-seed"><span class="studio-augment-label-text">Seed <span class="column-help-icon" title="Controls the random augmentation sequence. Reusing the same seed and options reproduces the same transformations.">?</span></span>
             <input id="studio-aug-seed" type="number" value="42">
           </label>
           <label class="studio-augment-check" for="studio-include-fixed">
             <input id="studio-include-fixed" type="checkbox" checked>
             Include fixed notebook augmentations
+            <span class="column-help-icon" title="Adds the established flip, rotation, translation, and zoom transformations from the robust offline training notebook.">?</span>
           </label>
         </div>
         <div class="studio-augment-preview-actions">
@@ -732,7 +758,7 @@
             <span class="studio-tool-label">Tool</span>
             <button id="studio-brush-btn" type="button" class="studio-tool-btn active">Brush</button>
             <button id="studio-eraser-btn" type="button" class="studio-tool-btn">Eraser</button>
-            <button id="studio-pan-btn" type="button" class="studio-tool-btn">Pan</button>
+            <p class="muted" style="margin:6px 0 0;">Double-click to toggle panning, or right-drag while zoomed.</p>
           </div>
           <div class="studio-tool-group">
             <label for="studio-brush-size">Brush size <span id="studio-brush-size-val">40</span> px</label>
