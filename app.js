@@ -244,7 +244,31 @@ function drawPdfMarker(pdf, marker, dataUrl, x, y) {
     drawPdfDimensionGuide(pdf, x, y, marker.sizeMm, marker.label);
 }
 
-async function generateArucoPrintSheetPdf() {
+function drawPdfInstructionList(pdf, items, x, y, width) {
+    const fontSize = 7.8;
+    const lineHeightMm = 3.45;
+    let cursorY = y;
+
+    items.forEach(item => {
+        const level = item.level || 0;
+        const indent = level === 0 ? 0 : 7;
+        const bulletX = x + indent;
+        const textX = bulletX + 3.2;
+        const availableWidth = Math.max(20, width - indent - 3.2);
+        const lines = pdf.splitTextToSize(item.text, availableWidth);
+
+        pdf.setFont("helvetica", item.bold ? "bold" : "normal");
+        pdf.setFontSize(fontSize);
+        pdf.setTextColor(30, 42, 50);
+        pdf.text("-", bulletX, cursorY);
+        pdf.text(lines, textX, cursorY);
+        cursorY += lines.length * lineHeightMm + (level === 0 ? 1.05 : 0.45);
+    });
+
+    return cursorY;
+}
+
+async function buildArucoPrintSheetPdf() {
     const jsPDF = window.jspdf?.jsPDF;
     if (!jsPDF) throw new Error("PDF library failed to load. Refresh the page and try again.");
 
@@ -281,33 +305,78 @@ async function generateArucoPrintSheetPdf() {
     pdf.setTextColor(70, 82, 90);
     pdf.text(siteUrl, pageW - margin, 10.5, { align: "right" });
 
-    const introText = "Make sure one of these codes is printed out and visible in your images. Which one you use will depend on the size of the fruit you’re trying to phenotype. As long as one of these codes is fully visible in each of your images, it doesn’t matter which you use.\nMake sure that they are printed to the correct size indicated below. In your print dialog, use Actual Size / 100% scale and turn off Fit to Page or Shrink to Printable Area.";
-    pdf.setFont("helvetica", "normal");
+    pdf.setFont("helvetica", "bolditalic");
     pdf.setFontSize(10);
     pdf.setTextColor(30, 42, 50);
-    const introLines = pdf.splitTextToSize(introText, pageW - margin * 2);
-    const introY = 30;
-    pdf.text(introLines, margin, introY);
+    const instructionsY = 28;
+    pdf.text("Using this ArUco code reference sheet:", margin, instructionsY);
+
+    const instructions = [
+        {
+            text: "Download and print this document on standard US Letter paper (8.5 x 11 in)."
+        },
+        {
+            level: 1,
+            text: "In the print dialog, choose Custom Scale: 100% (or Actual Size)."
+        },
+        {
+            level: 1,
+            text: "Turn off Fit to Page and Shrink to Printable Area."
+        },
+        {
+            text: "After printing, use calipers to verify that the black marker square matches the size printed below it."
+        },
+        {
+            level: 1,
+            text: "If it does not, recheck the print settings. You can also record the actual measurement for post-processing correction."
+        },
+        {
+            text: "Choose ONLY ONE code below, using the size closest to your fruit.",
+            bold: true
+        },
+        {
+            level: 1,
+            text: "Examples: watermelon - 100 mm; pepper - 50 mm; cherry - 10 mm."
+        },
+        {
+            text: "Cut along the dashed line and keep all padding inside it. Do not cut into the black code; leaving extra padding is fine."
+        },
+        {
+            text: "Keep the code clearly visible in every image. Place it upright as a square, rather than rotated like a diamond."
+        },
+        {
+            text: "Keep the code flat and flush. If helpful, attach it to a rigid, flat surface such as a table or small card."
+        },
+        {
+            text: "Place the code at the same imaging plane or distance as the fruit surface to improve measurement accuracy."
+        }
+    ];
+    const instructionsBottomY = drawPdfInstructionList(
+        pdf,
+        instructions,
+        margin + 1,
+        instructionsY + 5.4,
+        pageW - margin * 2 - 1
+    );
 
     const markerImages = await Promise.all(ARUCO_PRINT_CODES.map(async marker => ({
         marker,
         dataUrl: await rasterizeSquareForPdf(marker.file, Math.max(520, Math.round(marker.sizeMm * 16)))
     })));
 
-    const markerTopY = Math.max(54, introY + introLines.length * 4.2 + 8);
-    const marker4 = markerImages.find(item => item.marker.label === "4x4");
-    const marker5 = markerImages.find(item => item.marker.label === "5x5");
-    const marker6 = markerImages.find(item => item.marker.label === "6x6");
-    if (marker4) drawPdfMarker(pdf, marker4.marker, marker4.dataUrl, margin + 8, markerTopY + 18);
-    if (marker5) drawPdfMarker(pdf, marker5.marker, marker5.dataUrl, margin + 58, markerTopY + 4);
-    if (marker6) drawPdfMarker(pdf, marker6.marker, marker6.dataUrl, (pageW - marker6.marker.sizeMm) / 2, markerTopY + 72);
-
-    const closingY = markerTopY + 72 + 100 + 18;
-    const closingText = "You may cut out the code you intend to use, but ensure that it lies flat and flush in the image. It may help to glue it to a hard flat surface like a table or a small card.";
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(10);
-    pdf.setTextColor(30, 42, 50);
-    pdf.text(pdf.splitTextToSize(closingText, pageW - margin * 2), margin, closingY);
+    const markerGapMm = 9;
+    const markerSpanMm = ARUCO_PRINT_CODES.reduce((sum, marker) => sum + marker.sizeMm, 0)
+        + markerGapMm * (ARUCO_PRINT_CODES.length - 1);
+    const markerStartX = (pageW - markerSpanMm) / 2;
+    const largestMarkerMm = Math.max(...ARUCO_PRINT_CODES.map(marker => marker.sizeMm));
+    const markerTopY = Math.max(96, instructionsBottomY + 7);
+    const markerBottomY = markerTopY + largestMarkerMm;
+    let markerX = markerStartX;
+    markerImages.forEach(({ marker, dataUrl }) => {
+        const markerY = markerBottomY - marker.sizeMm;
+        drawPdfMarker(pdf, marker, dataUrl, markerX, markerY);
+        markerX += marker.sizeMm + markerGapMm;
+    });
 
     const timestamp = new Intl.DateTimeFormat("en-US", {
         month: "long",
@@ -321,6 +390,11 @@ async function generateArucoPrintSheetPdf() {
     pdf.setTextColor(90, 104, 114);
     pdf.text(timestamp, pageW - margin, pageH - 8, { align: "right" });
 
+    return pdf;
+}
+
+async function generateArucoPrintSheetPdf() {
+    const pdf = await buildArucoPrintSheetPdf();
     pdf.save("aruco_calibration_codes.pdf");
 }
 
