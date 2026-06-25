@@ -63,6 +63,17 @@
             augmentExportBtn: el("studio-augment-export-btn"),
             augCount: el("studio-aug-count"),
             bgProb: el("studio-bg-prob"),
+            bgSwapStrength: el("studio-bg-swap-strength"),
+            bgColorProb: el("studio-bg-color-prob"),
+            bgColorStrength: el("studio-bg-color-strength"),
+            bgSolidProb: el("studio-bg-solid-prob"),
+            bgSolidStrength: el("studio-bg-solid-strength"),
+            bgSurfaceProb: el("studio-bg-surface-prob"),
+            bgSurfaceStrength: el("studio-bg-surface-strength"),
+            bgClutterProb: el("studio-bg-clutter-prob"),
+            bgClutterStrength: el("studio-bg-clutter-strength"),
+            bgNoveltyProb: el("studio-bg-novelty-prob"),
+            bgNoveltyStrength: el("studio-bg-novelty-strength"),
             valFraction: el("studio-val-fraction"),
             augSeed: el("studio-aug-seed"),
             includeFixed: el("studio-include-fixed"),
@@ -370,8 +381,19 @@
     function readAugmentOptions() {
         const d = dom();
         return {
-            random_augs_per_image: Math.max(0, Math.min(80, Number(d.augCount?.value || 12))),
+            random_augs_per_image: Math.max(0, Math.min(200, Number(d.augCount?.value || 12))),
             background_swap_prob: Math.max(0, Math.min(1, Number(d.bgProb?.value || 0.25))),
+            background_swap_strength: Math.max(0, Math.min(1, Number(d.bgSwapStrength?.value || 1))),
+            background_color_prob: Math.max(0, Math.min(1, Number(d.bgColorProb?.value || 0.18))),
+            background_color_strength: Math.max(0, Math.min(1, Number(d.bgColorStrength?.value || 0.65))),
+            solid_background_prob: Math.max(0, Math.min(1, Number(d.bgSolidProb?.value || 0.08))),
+            solid_background_strength: Math.max(0, Math.min(1, Number(d.bgSolidStrength?.value || 1))),
+            surface_background_prob: Math.max(0, Math.min(1, Number(d.bgSurfaceProb?.value || 0.18))),
+            surface_background_strength: Math.max(0, Math.min(1, Number(d.bgSurfaceStrength?.value || 0.75))),
+            background_clutter_prob: Math.max(0, Math.min(1, Number(d.bgClutterProb?.value || 0.25))),
+            background_clutter_strength: Math.max(0, Math.min(1, Number(d.bgClutterStrength?.value || 0.55))),
+            background_novelty_prob: Math.max(0, Math.min(1, Number(d.bgNoveltyProb?.value || 0.12))),
+            background_novelty_strength: Math.max(0, Math.min(1, Number(d.bgNoveltyStrength?.value || 0.55))),
             val_fraction: Math.max(0, Math.min(0.5, Number(d.valFraction?.value || 0.2))),
             seed: Number(d.augSeed?.value || 42),
             include_fixed: Boolean(d.includeFixed?.checked)
@@ -542,6 +564,7 @@
                 expert_id: opts.expertId || document.getElementById("model-version-select")?.value || "auto",
                 dataset_ids: [datasetId],
                 fruit_type: opts.fruitType || null,
+                aug_options: readAugmentOptions(),
                 password: currentPassword,
                 username: currentUsername
             };
@@ -1085,6 +1108,15 @@
     function bindEvents() {
         const d = dom();
         if (!d.canvas) return;
+
+        document.querySelectorAll(".studio-strength-row input[type='range'][data-output]").forEach((input) => {
+            const output = el(input.dataset.output);
+            const sync = () => {
+                if (output) output.innerText = `${Math.round(Number(input.value || 0) * 100)}%`;
+            };
+            input.addEventListener("input", sync);
+            sync();
+        });
 
         d.exportBtn?.addEventListener("click", exportZip);
         d.augmentExportBtn?.addEventListener("click", augmentExportZip);

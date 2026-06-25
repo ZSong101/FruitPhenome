@@ -1109,7 +1109,7 @@ function initSettingsWizard() {
     showWizardStep(1);
 }
 
-async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null, settings = null, includeLineOcr = null, rowId = null, requestedColumnIdsOverride = null) {
+async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEOUT_MS, maxRetries = 1, externalSignal = null, settings = null, includeLineOcr = null, rowId = null, requestedColumnIdsOverride = null, sessionIdOverride = null) {
     const requestSettings = settings || getAnalysisSettingsSnapshot();
     const requestColumnIds = requestedColumnIdsOverride || selectedColumnIdsForRequest();
     const runLineOcr = includeLineOcr ?? shouldRequestLineOcr(previewIds, requestSettings);
@@ -1117,7 +1117,7 @@ async function postImage(file, previewIds = [], timeoutMs = SINGLE_REQUEST_TIMEO
     formData.append("password", currentPassword);
     formData.append("username", currentUsername); 
     formData.append("file", file);
-    formData.append("session_id", currentSessionId);
+    formData.append("session_id", sessionIdOverride || currentSessionId);
     if (rowId) formData.append("row_id", rowId);
     formData.append("requested_columns", JSON.stringify(requestColumnIds));
     appendAnalysisSettings(formData, requestSettings);
@@ -1268,22 +1268,35 @@ function cmMetricColumn(id, label, field, digits = (item) => item.digits, option
     return column;
 }
 
-function previewColumn(id, label, field) {
+function previewContextAttributes(data, field, adjustable = false) {
+    return [
+        `data-preview-type="${escapeHtml(field)}"`,
+        `data-session-id="${escapeHtml(data?.session_id || "")}"`,
+        `data-row-id="${escapeHtml(data?.row_id || "")}"`,
+        `data-filename="${escapeHtml(data?.filename || "")}"`,
+        adjustable ? `data-adjustable="true"` : ""
+    ].filter(Boolean).join(" ");
+}
+
+function previewColumn(id, label, field, options = {}) {
     return {
         id,
         label,
         histogram: false,
         csv: false,
+        adjustable: Boolean(options.adjustable),
+        cellClass: options.adjustable ? "adjustable-preview-cell" : "",
         get: () => null,
         html: (item) => {
+            const contextAttrs = previewContextAttributes(item.data, field, options.adjustable);
             if (item.data?.[field]) {
                 const fullUrl = previewFetchUrl(item.data, field, "full");
-                return `<img src="data:image/jpeg;base64,${item.data[field]}" data-full-src="${escapeHtml(fullUrl || `data:image/jpeg;base64,${item.data[field]}`)}" class="thumb preview-img">`;
+                return `<img src="data:image/jpeg;base64,${item.data[field]}" data-full-src="${escapeHtml(fullUrl || `data:image/jpeg;base64,${item.data[field]}`)}" ${contextAttrs} class="thumb preview-img">`;
             }
             const thumbUrl = previewFetchUrl(item.data, field, "thumb");
             const fullUrl = previewFetchUrl(item.data, field, "full");
             if (thumbUrl) {
-                return `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" class="thumb preview-img">`;
+                return `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" ${contextAttrs} class="thumb preview-img">`;
             }
             return itemHasPendingColumn(item, id)
                 ? `<span class="muted">Computing...</span>`
@@ -1414,10 +1427,16 @@ const COLUMN_GROUPS = [
                 columns: [
                     previewColumn("image_ocr_dbnet_base64", "Preview (OCR DBNet)", "image_ocr_dbnet_base64"),
                     previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
-                    previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64"),
-                    previewColumn("image_cleanup_hybrid_base64", "Preview (Cleanup)", "image_cleanup_hybrid_base64"),
-                    previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64"),
-                    previewColumn("image_traditional_base64", "Preview (Traditional) (TA)", "image_traditional_base64")
+                    previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64")
+                ]
+            },
+            {
+                id: "previews_adjustable",
+                label: "Adjustable Feature Previews",
+                columns: [
+                    previewColumn("image_cleanup_hybrid_base64", "Preview (Cleanup)", "image_cleanup_hybrid_base64", { adjustable: true }),
+                    previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64", { adjustable: true }),
+                    previewColumn("image_traditional_base64", "Preview (Traditional) (TA)", "image_traditional_base64", { adjustable: true })
                 ]
             }
         ]
@@ -1450,7 +1469,8 @@ const GROUP_HELP_TEXT = {
     traditional_end_shape: "End-shape features (TA) describe proximal and distal tip angles, blockiness, and indentation using the user-adjustable settings in Analysis Settings.",
     traditional_fit: "Common-shape fit features (TA) compare the cleaned fruit boundary to simple geometric or named fruit-shape templates.",
     previews: "Preview columns return diagnostic images. They are excluded from histograms and CSV downloads.",
-    previews_standard: "Standard previews show the OCR, calibration, mask cleanup, smoothing, and traditional-feature overlays requested for each image.",
+    previews_standard: "Standard previews show OCR, calibration, and raw model outputs requested for each image.",
+    previews_adjustable: "Adjustable feature previews are highlighted in pale purple. Open Cleanup, Smooth, or Traditional (TA) previews to repaint masks, constrain and refit smoothing curves, or visually adjust traditional measurement controls.",
     run_info: "Run information columns describe OCR metadata, QR code data, and processing time rather than fruit morphology."
 };
 
@@ -1519,9 +1539,9 @@ const COLUMN_HELP_TEXT = {
     image_ocr_dbnet_base64: "Diagnostic OCR preview showing DBNet text boxes, candidate reads, confidences, and selected Line when OCR is requested. It helps diagnose Line detection errors.",
     image_pre_calibration_base64: "Image before color calibration, with ColorChecker overlay when available. Use it to verify the detected board is the middle 24-patch Passport page shown in Analysis Settings.",
     image_raw_base64: "Raw model-output preview retained for diagnosis. It shows the original predicted masks before cleanup is used for measurement.",
-    image_cleanup_hybrid_base64: "Cleanup preview showing processed masks, raw mask outlines, axes, midline, and ColorChecker overlay. These cleaned masks feed the main measurements.",
-    image_sm_base64: "Smoothed preview showing fitted fruit and flesh curves plus smoothed endpoint angle geometry. It helps verify the function-fit measurements.",
-    image_traditional_base64: "Traditional (TA) preview showing Tomato Analyzer-style overlays such as axes, widths, angles, circle, ellipse, and indentation areas. It helps audit the Tomato Analyzer (TA) descriptors.",
+    image_cleanup_hybrid_base64: "Cleanup preview showing processed masks, raw mask outlines, axes, midline, and ColorChecker overlay. Open it and choose Adjust Features to repaint the masks, recalculate the row, and save a correction for model fine-tuning.",
+    image_sm_base64: "Smoothed preview showing fitted fruit and flesh curves plus endpoint angle geometry. Open it and choose Adjust Features to repaint masks or drag weighted rind/flesh curve anchors; saving refits all smoothing parameters together.",
+    image_traditional_base64: "Traditional (TA) preview showing Tomato Analyzer-style overlays such as axes, widths, angles, circle, ellipse, and indentation areas. Open it and choose Adjust Features to repaint masks or drag the proximal width, distal width, angle-span, and indentation-band controls.",
     line: "Short Line ID detected from text in the image, optionally constrained by the Possible Lines list. It may contain letters, numbers, dashes, or underscores.",
     line_confidence: "Confidence score for the selected Line read or matched Line option. Lower values should be checked manually.",
     line_orientation: "Image rotation inferred from the selected OCR read and used for mask generation when text is detected. A value of 0 means no rotation was applied.",
@@ -1909,7 +1929,7 @@ function renderColumnPicker() {
     if (!menus.length) return;
 
     const renderGroup = (group, depth = 0) => `
-        <details class="column-group column-depth-${depth}" open>
+        <details class="column-group column-depth-${depth} ${group.id === "previews_adjustable" ? "adjustable-preview-group" : ""}" data-group-id="${group.id}" open>
             <summary>
                 <label>
                     <input type="checkbox" class="column-group-checkbox" data-group-id="${group.id}">
@@ -1920,7 +1940,7 @@ function renderColumnPicker() {
                 ${(group.children || []).map(child => renderGroup(child, depth + 1)).join("")}
                 ${group.columns && group.columns.length ? `<div class="column-options">
                     ${orderedColumns(group.columns).map(column => `
-                    <label class="column-option" draggable="true" data-column-id="${column.id}">
+                    <label class="column-option ${column.adjustable ? "adjustable-preview-option" : ""}" draggable="true" data-column-id="${column.id}">
                         <span class="column-drag-handle" aria-hidden="true">::</span>
                         <input type="checkbox" class="column-checkbox" data-column-id="${column.id}">
                         <span>${escapeHtml(column.label)}</span>
@@ -1956,7 +1976,7 @@ function renderColumnHelp() {
         const groupText = GROUP_HELP_TEXT[group.id] || "";
         const groupHtml = GROUP_HELP_HTML[group.id] || (groupText ? escapeHtml(groupText) : "");
         return `
-            <details class="help-group help-depth-${depth}" open>
+            <details class="help-group help-depth-${depth} ${group.id === "previews_adjustable" ? "adjustable-preview-group" : ""}" open>
                 <summary>${escapeHtml(group.label)}</summary>
                 ${groupHtml ? `<p class="help-group-text">${groupHtml}</p>` : ""}
                 <div class="help-children">
@@ -2256,13 +2276,14 @@ function renderSinglePreviewCards(data, previewIds) {
         const imageData = data[column.id];
         const thumbUrl = previewFetchUrl(data, column.id, "thumb");
         const fullUrl = previewFetchUrl(data, column.id, "full");
+        const contextAttrs = previewContextAttributes(data, column.id, column.adjustable);
         return `
-            <div class="result-card single-preview-card">
+            <div class="result-card single-preview-card ${column.adjustable ? "adjustable-preview-card" : ""}">
                 <h3>${escapeHtml(column.label)}</h3>
                 ${imageData
-                    ? `<img src="data:image/jpeg;base64,${imageData}" data-full-src="${escapeHtml(fullUrl || `data:image/jpeg;base64,${imageData}`)}" class="preview-img single-preview-img">`
+                    ? `<img src="data:image/jpeg;base64,${imageData}" data-full-src="${escapeHtml(fullUrl || `data:image/jpeg;base64,${imageData}`)}" ${contextAttrs} class="preview-img single-preview-img">`
                     : thumbUrl
-                        ? `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" class="preview-img single-preview-img">`
+                        ? `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" ${contextAttrs} class="preview-img single-preview-img">`
                         : `<span class="muted">Preview unavailable</span>`}
             </div>
         `;
@@ -2374,7 +2395,8 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
     const run = {
         abortController: new AbortController(),
         running: true,
-        stopRequested: false
+        stopRequested: false,
+        sessionId: makeClientId("single")
     };
     activeSingleRun = run;
     status.innerText = "Processing...";
@@ -2386,7 +2408,18 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
 
     try {
         const requestedPreviewIds = selectedPreviewIds();
-        const data = await postImage(file, requestedPreviewIds, SINGLE_REQUEST_TIMEOUT_MS, 0, run.abortController.signal, getAnalysisSettingsSnapshot());  // No retries for single images
+        const data = await postImage(
+            file,
+            requestedPreviewIds,
+            SINGLE_REQUEST_TIMEOUT_MS,
+            0,
+            run.abortController.signal,
+            getAnalysisSettingsSnapshot(),
+            null,
+            null,
+            null,
+            run.sessionId
+        );  // No retries for single images
         if (run.stopRequested || activeSingleRun !== run) return;
         
         if (data.success) {
@@ -3421,7 +3454,7 @@ function renderTableHeader() {
                 </span>
             </th>
             ${visibleColumns().map(column => `
-                <th class="draggable-column-header" draggable="true" data-column-id="${column.id}">
+                <th class="draggable-column-header ${column.adjustable ? "adjustable-preview-header" : ""}" draggable="true" data-column-id="${column.id}">
                     <span class="column-title-wrap">
                         <span>${escapeHtml(column.label)}</span>
                         ${columnHelpIcon(column)}
@@ -3535,7 +3568,7 @@ function renderHistogramPreviewFooter(columns) {
             <td></td>
             <td class="histogram-preview-label">Distribution previews, see proper histograms below.</td>
             <td></td>
-            ${columns.map(column => `<td>${miniHistogramSvg(column)}</td>`).join("")}
+            ${columns.map(column => `<td class="${column.adjustable ? "adjustable-preview-cell" : ""}">${miniHistogramSvg(column)}</td>`).join("")}
         </tr>
     `;
 }
@@ -4200,9 +4233,42 @@ const lightbox = document.getElementById("lightbox");
 const lightboxImg = document.getElementById("lightbox-img");
 const lightboxClose = document.getElementById("lightbox-close");
 const lightboxStatus = document.getElementById("lightbox-status");
+const lightboxAdjustBtn = document.getElementById("lightbox-adjust-btn");
+const lightboxZoomControls = document.getElementById("lightbox-zoom-controls");
+const lightboxZoomOut = document.getElementById("lightbox-zoom-out");
+const lightboxZoomReset = document.getElementById("lightbox-zoom-reset");
+const lightboxZoomIn = document.getElementById("lightbox-zoom-in");
+let lightboxPreviewContext = null;
+let lightboxTransform = { scale: 1, x: 0, y: 0 };
+let lightboxDrag = null;
+
+function renderLightboxTransform() {
+    const { scale, x, y } = lightboxTransform;
+    lightboxImg.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    lightboxImg.classList.toggle("zoomed", scale > 1.001);
+    if (lightboxZoomReset) lightboxZoomReset.innerText = `${Math.round(scale * 100)}%`;
+}
+
+function resetLightboxTransform() {
+    lightboxTransform = { scale: 1, x: 0, y: 0 };
+    lightboxDrag = null;
+    lightboxImg.classList.remove("dragging");
+    renderLightboxTransform();
+}
+
+function setLightboxScale(nextScale) {
+    const scale = Math.max(0.5, Math.min(8, Number(nextScale) || 1));
+    lightboxTransform.scale = scale;
+    if (scale <= 1) {
+        lightboxTransform.x = 0;
+        lightboxTransform.y = 0;
+    }
+    renderLightboxTransform();
+}
 
 function closeLightbox() {
     lightbox.style.display = "none";
+    lightboxPreviewContext = null;
     lightboxImg.onload = null;
     lightboxImg.onerror = null;
     lightboxImg.src = "";
@@ -4211,13 +4277,21 @@ function closeLightbox() {
         lightboxStatus.innerText = "";
         lightboxStatus.style.display = "none";
     }
+    if (lightboxAdjustBtn) lightboxAdjustBtn.style.display = "none";
+    lightboxZoomControls?.classList.remove("visible");
+    resetLightboxTransform();
 }
 
-function openLightbox(fullSrc, fallbackSrc = "") {
+function openLightbox(fullSrc, fallbackSrc = "", previewContext = null) {
     const primarySrc = fullSrc || fallbackSrc;
     if (!primarySrc) return;
 
     lightbox.style.display = "flex";
+    resetLightboxTransform();
+    lightboxPreviewContext = previewContext;
+    if (lightboxAdjustBtn) {
+        lightboxAdjustBtn.style.display = previewContext?.adjustable ? "inline-flex" : "none";
+    }
     lightboxImg.style.display = "none";
     lightboxImg.onload = null;
     lightboxImg.onerror = null;
@@ -4233,10 +4307,13 @@ function openLightbox(fullSrc, fallbackSrc = "") {
             lightboxStatus.style.display = "none";
         }
         lightboxImg.style.display = "block";
+        lightboxZoomControls?.classList.add("visible");
+        resetLightboxTransform();
     };
 
     lightboxImg.onerror = () => {
         lightboxImg.style.display = "none";
+        lightboxZoomControls?.classList.remove("visible");
         if (lightboxStatus) {
             lightboxStatus.innerText = "Preview failed to load.";
             lightboxStatus.style.display = "block";
@@ -4249,8 +4326,76 @@ function openLightbox(fullSrc, fallbackSrc = "") {
 // Listen for clicks on ANY image with the 'preview-img' class
 document.body.addEventListener("click", (e) => {
     if (e.target && e.target.classList.contains("preview-img")) {
-        openLightbox(e.target.dataset.fullSrc || "", e.target.src || "");
+        openLightbox(e.target.dataset.fullSrc || "", e.target.src || "", {
+            previewType: e.target.dataset.previewType || "",
+            sessionId: e.target.dataset.sessionId || "",
+            rowId: e.target.dataset.rowId || "",
+            filename: e.target.dataset.filename || "",
+            adjustable: e.target.dataset.adjustable === "true"
+        });
     }
+});
+
+lightboxAdjustBtn?.addEventListener("click", () => {
+    if (!lightboxPreviewContext?.adjustable) return;
+    window.PreviewAdjustments?.open(lightboxPreviewContext);
+});
+
+lightboxZoomOut?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setLightboxScale(lightboxTransform.scale / 1.25);
+});
+
+lightboxZoomIn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setLightboxScale(lightboxTransform.scale * 1.25);
+});
+
+lightboxZoomReset?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    resetLightboxTransform();
+});
+
+lightboxImg.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setLightboxScale(lightboxTransform.scale * (event.deltaY < 0 ? 1.16 : 1 / 1.16));
+}, { passive: false });
+
+lightboxImg.addEventListener("pointerdown", (event) => {
+    if (lightboxTransform.scale <= 1.001 || event.button !== 0) return;
+    event.preventDefault();
+    lightboxImg.setPointerCapture(event.pointerId);
+    lightboxDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: lightboxTransform.x,
+        originY: lightboxTransform.y
+    };
+    lightboxImg.classList.add("dragging");
+});
+
+lightboxImg.addEventListener("pointermove", (event) => {
+    if (!lightboxDrag || lightboxDrag.pointerId !== event.pointerId) return;
+    lightboxTransform.x = lightboxDrag.originX + event.clientX - lightboxDrag.startX;
+    lightboxTransform.y = lightboxDrag.originY + event.clientY - lightboxDrag.startY;
+    renderLightboxTransform();
+});
+
+function endLightboxDrag(event) {
+    if (!lightboxDrag || lightboxDrag.pointerId !== event.pointerId) return;
+    lightboxDrag = null;
+    lightboxImg.classList.remove("dragging");
+}
+
+lightboxImg.addEventListener("pointerup", endLightboxDrag);
+lightboxImg.addEventListener("pointercancel", endLightboxDrag);
+lightboxImg.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (lightboxTransform.scale > 1.001) resetLightboxTransform();
+    else setLightboxScale(2);
 });
 
 // Close when clicking the X
@@ -4262,6 +4407,114 @@ lightbox.addEventListener("click", (e) => {
         closeLightbox();
     }
 });
+
+const MASK_ADJUSTMENT_COLUMNS = [
+    ...RAW_STAGE_COLUMN_IDS,
+    ...SMOOTH_STAGE_COLUMN_IDS,
+    ...TRADITIONAL_STAGE_COLUMN_IDS,
+    "image_cleanup_hybrid_base64",
+    "image_sm_base64",
+    "image_traditional_base64"
+];
+const TRADITIONAL_ADJUSTMENT_COLUMNS = [
+    ...TRADITIONAL_STAGE_COLUMN_IDS,
+    "image_traditional_base64"
+];
+const SMOOTHING_ADJUSTMENT_COLUMNS = [
+    ...SMOOTH_STAGE_COLUMN_IDS,
+    "image_sm_base64"
+];
+
+function applySingleAdjustmentPatch(rowPatch) {
+    if (!latestSingleData || latestSingleData.row_id !== rowPatch?.row_id) return false;
+    const previousMs = Number(latestSingleData.processing_ms);
+    const extraMs = Number(rowPatch.stage_processing_ms);
+    const patch = { ...rowPatch };
+    if (Number.isFinite(extraMs) && extraMs > 0) {
+        patch.processing_ms = Math.round((Number.isFinite(previousMs) ? previousMs : 0) + extraMs);
+    }
+    latestSingleData = { ...latestSingleData, ...patch };
+    renderCurrentSingleAnalysis();
+    return true;
+}
+
+async function recomputeAdjustedRows(sessionId, rowIds, requestedColumns, settingsOverride = null) {
+    const knownIds = Array.from(new Set(rowIds || [])).filter(rowId => (
+        (latestSingleData?.row_id === rowId && latestSingleData?.success !== false)
+        || globalBatchResults.some(item => item.data?.row_id === rowId && item.success && !item.retrying)
+    ));
+    if (!knownIds.length) return [];
+    const batch = activeBatch?.sessionId === sessionId
+        ? activeBatch
+        : {
+            sessionId,
+            settings: getAnalysisSettingsSnapshot(),
+            running: false,
+            onDemandRunning: false,
+            elapsedMs: 0
+        };
+    if (settingsOverride) {
+        batch.settings = { ...(batch.settings || {}), traditionalSettings: { ...settingsOverride } };
+        if (activeBatch?.sessionId === sessionId) activeBatch.settings = batch.settings;
+    }
+
+    const ownsBatchUi = activeBatch === batch;
+    if (ownsBatchUi) {
+        batch.onDemandStopRequested = false;
+        batch.onDemandAbortController = new AbortController();
+        startOnDemandBatchTimer(batch, knownIds.length);
+        updateBatchControls(batch);
+    }
+    const patches = [];
+    try {
+        for (const rowId of knownIds) {
+            if (ownsBatchUi && (batch.onDemandStopRequested || batch.onDemandAbortController?.signal.aborted)) break;
+            const response = await postBatchStage(
+                [rowId],
+                requestedColumns,
+                batch,
+                ownsBatchUi ? batch.onDemandAbortController.signal : null
+            );
+            (response.rows || []).forEach(rowPatch => {
+                if (!applySingleAdjustmentPatch(rowPatch)) mergeStagePatch(rowPatch);
+                patches.push(rowPatch);
+            });
+            if (ownsBatchUi) {
+                batch.onDemandCompleted = Math.min(batch.onDemandTotal, batch.onDemandCompleted + 1);
+                updateBatchTimer(batch);
+                updateBatchProgress(batch);
+                refreshBatchOutputs(document.getElementById("histograms-container"), { debounceHistograms: true });
+            }
+        }
+    } finally {
+        if (ownsBatchUi) {
+            finishOnDemandBatchTimer(batch);
+            batch.onDemandAbortController = null;
+            updateBatchControls(batch);
+            refreshBatchOutputs(document.getElementById("histograms-container"));
+        }
+        renderCurrentSingleAnalysis();
+    }
+    return patches;
+}
+
+window.PhenotypeAdjustmentsHost = {
+    apiBase: () => `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_adjustments" : "adjustments"}`,
+    credentials: () => ({ username: currentUsername, password: currentPassword }),
+    closeLightbox,
+    recomputeMasks: (sessionId, rowIds) => recomputeAdjustedRows(sessionId, rowIds, MASK_ADJUSTMENT_COLUMNS),
+    recomputeTraditional: (sessionId, rowIds, settings) => recomputeAdjustedRows(
+        sessionId,
+        rowIds,
+        TRADITIONAL_ADJUSTMENT_COLUMNS,
+        settings
+    ),
+    recomputeSmoothing: (sessionId, rowIds) => recomputeAdjustedRows(
+        sessionId,
+        rowIds,
+        SMOOTHING_ADJUSTMENT_COLUMNS
+    )
+};
 
 function clearPreviewSessionBeacon() {
     if (!currentSessionId) return;

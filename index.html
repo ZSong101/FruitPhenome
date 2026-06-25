@@ -252,6 +252,17 @@
     .studio-augment-grid input { padding: 7px 8px; border: 1px solid #c8d1d8; border-radius: 5px; font-size: 14px; }
     .studio-augment-check { flex-direction: row !important; align-items: center; gap: 8px !important; }
     .studio-augment-check input { width: auto; }
+    .studio-background-options { margin-top: 14px; padding-top: 13px; border-top: 1px solid #d8e1e8; }
+    .studio-background-options h4 { margin: 0 0 4px; color: #283f50; font-size: 14px; }
+    .studio-background-options > p { margin: 0 0 10px; }
+    .studio-background-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 9px; }
+    .studio-background-card { display: grid; gap: 8px; padding: 10px; border: 1px solid #d5dee5; border-radius: 7px; background: #fff; }
+    .studio-background-card h5 { display: flex; align-items: center; gap: 5px; margin: 0; color: #263c4a; font-size: 13px; }
+    .studio-background-card label { display: grid; grid-template-columns: minmax(0, 1fr) 76px; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; }
+    .studio-background-card input[type="number"] { width: 76px; box-sizing: border-box; padding: 6px 7px; border: 1px solid #c8d1d8; border-radius: 5px; }
+    .studio-strength-row { grid-template-columns: minmax(0, 1fr) 52px !important; }
+    .studio-strength-row input[type="range"] { grid-column: 1 / -1; width: 100%; padding: 0; }
+    .studio-strength-value { justify-self: end; color: #496579; font-variant-numeric: tabular-nums; }
     .studio-job { display: none; margin: -8px 0 16px; padding: 10px 12px; border: 1px solid #d8e1e8; border-radius: 8px; background: #f8fafb; }
     .studio-job.visible { display: block; }
     .studio-job-bar { height: 8px; border-radius: 999px; overflow: hidden; background: #e3eaf0; margin-top: 8px; }
@@ -261,7 +272,7 @@
     .studio-augment-preview-actions button { min-height: 36px; padding: 7px 12px; border: 1px solid #b9c3cc; border-radius: 6px; background: #eef1f4; color: #1e2a32; font-weight: 700; cursor: pointer; }
     .studio-augment-preview { display: none; margin-top: 12px; }
     .studio-augment-preview.visible { display: block; }
-    .studio-augment-preview img { display: block; width: min(100%, 920px); height: auto; border: 1px solid #c9d4dc; border-radius: 6px; cursor: zoom-in; }
+    .studio-augment-preview img { display: block; width: min(100%, 720px); max-height: 72vh; object-fit: contain; height: auto; border: 1px solid #c9d4dc; border-radius: 6px; cursor: zoom-in; }
     .studio-main { display: grid; grid-template-columns: 200px minmax(0, 1fr) 230px; gap: 16px; align-items: start; }
     .studio-queue { border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; padding: 10px; max-height: 640px; overflow: auto; }
     .studio-queue h3, .studio-tools h3 { margin: 0 0 8px; font-size: 15px; }
@@ -541,7 +552,7 @@
           </div>
           <div class="compat-example-block">
             <h3 class="compat-example-title">Example Image and Output Previews</h3>
-            <p class="muted">The first card shows the kind of input image expected by the app. The cards to the right show preview outputs; any additional features you select are returned as numeric or text data columns.</p>
+            <p class="muted">The first card shows the kind of input image expected by the app. The cards to the right show preview outputs; any additional features you select are returned as numeric or text data columns. Purple preview cards are adjustable after processing: open them to repaint masks or change the visual Legacy Features (TA) controls.</p>
             <div class="compat-example-strip" aria-label="Example input and output preview images">
               <figure class="compat-example-card">
                 <img class="preview-img" src="example_image.png" data-full-src="example_image.png" alt="Example fruit image expected by the program">
@@ -552,17 +563,17 @@
                 <img class="preview-img" src="example_image_ocr_dbnet_base64.jpg" data-full-src="example_image_ocr_dbnet_base64.jpg" alt="Example OCR preview output">
                 <figcaption><strong>OCR preview</strong>Expected output preview for detected text labels; selected label features are also returned as numeric/text columns.</figcaption>
               </figure>
-              <figure class="compat-example-card expected-output">
+              <figure class="compat-example-card expected-output adjustable-example">
                 <img class="preview-img" src="example_image_cleanup_hybrid_base64.jpg" data-full-src="example_image_cleanup_hybrid_base64.jpg" alt="Example cleanup mask preview output">
-                <figcaption><strong>Cleanup preview</strong>Expected output preview for cleaned masks; selected standard features are also returned as numeric columns.</figcaption>
+                <figcaption><strong>Cleanup preview</strong>Expected output for cleaned masks. After processing, this preview can be opened to repaint masks, recalculate measurements, and save a fine-tuning correction.</figcaption>
               </figure>
-              <figure class="compat-example-card expected-output">
+              <figure class="compat-example-card expected-output adjustable-example">
                 <img class="preview-img" src="example_image_sm_base64.jpg" data-full-src="example_image_sm_base64.jpg" alt="Example smoothing preview output">
-                <figcaption><strong>Smoothing preview</strong>Expected output preview for function fits; selected smoothing features are also returned as numeric columns.</figcaption>
+                <figcaption><strong>Smoothing preview</strong>Expected output for function fits. Open it after processing to repaint masks or drag weighted curve anchors and refit the rind or flesh smoothing function.</figcaption>
               </figure>
-              <figure class="compat-example-card expected-output">
+              <figure class="compat-example-card expected-output adjustable-example">
                 <img class="preview-img" src="example_image_traditional_base64.jpg" data-full-src="example_image_traditional_base64.jpg" alt="Example traditional feature preview output">
-                <figcaption><strong>Traditional preview (TA)</strong>Expected output preview for Legacy Features (TA), along with selected numeric data outputs.</figcaption>
+                <figcaption><strong>Traditional preview (TA)</strong>Expected output for Legacy Features (TA). Open it after processing to repaint masks or drag the width, angle-span, and indentation controls.</figcaption>
               </figure>
             </div>
           </div>
@@ -690,22 +701,79 @@
         <p class="muted">These settings generate transformed training copies from approved masks. Preview uses the same augmentation pipeline at a smaller display resolution; export retains the configured training resolution.</p>
         <div class="studio-augment-grid">
           <label for="studio-aug-count"><span class="studio-augment-label-text">Random augs / image <span class="column-help-icon" title="Number of randomly generated geometric and photometric variants created from each approved training image, in addition to any fixed augmentations.">?</span></span>
-            <input id="studio-aug-count" type="number" min="0" max="80" value="12">
-          </label>
-          <label for="studio-bg-prob"><span class="studio-augment-label-text">Background swap probability <span class="column-help-icon" title="Chance that an augmented training image keeps the labeled fruit but replaces its surrounding background with another sampled background.">?</span></span>
-            <input id="studio-bg-prob" type="number" min="0" max="1" step="0.05" value="0.25">
+            <input id="studio-aug-count" type="number" min="0" max="200" value="12">
           </label>
           <label for="studio-val-fraction"><span class="studio-augment-label-text">Validation fraction <span class="column-help-icon" title="Fraction of approved source images reserved as unaugmented validation examples rather than used for model fitting.">?</span></span>
             <input id="studio-val-fraction" type="number" min="0" max="0.5" step="0.05" value="0.20">
           </label>
           <label for="studio-aug-seed"><span class="studio-augment-label-text">Seed <span class="column-help-icon" title="Controls the random augmentation sequence. Reusing the same seed and options reproduces the same transformations.">?</span></span>
-            <input id="studio-aug-seed" type="number" value="42">
+            <input id="studio-aug-seed" type="number" value="100">
           </label>
           <label class="studio-augment-check" for="studio-include-fixed">
             <input id="studio-include-fixed" type="checkbox" checked>
-            Include fixed notebook augmentations
-            <span class="column-help-icon" title="Adds the established flip, rotation, translation, and zoom transformations from the robust offline training notebook.">?</span>
+            Include fixed augmentations
+            <span class="column-help-icon" title="Adds the established flip, rotation, translation, and zoom transformations. Background families are controlled independently below.">?</span>
           </label>
+        </div>
+        <div class="studio-background-options">
+          <h4>Background augmentation mix</h4>
+          <p class="muted">The four replacement probabilities form a background mix; any remaining fraction keeps the original background, and totals above 1 are normalized. Ordinary clutter and out-of-context objects are added independently and can coexist with any background. Set a probability to 0 to disable that family.</p>
+          <div class="studio-background-grid">
+            <section class="studio-background-card">
+              <h5>Fruit-free donor <span class="column-help-icon" title="Replaces the background with another dataset background after all annotated fruit regions have been removed. Strength controls how fully the donor replaces the original background.">?</span></h5>
+              <label for="studio-bg-prob">Probability
+                <input id="studio-bg-prob" type="number" min="0" max="1" step="0.05" value="0.25">
+              </label>
+              <label class="studio-strength-row" for="studio-bg-swap-strength">Strength <span id="studio-bg-swap-strength-value" class="studio-strength-value">100%</span>
+                <input id="studio-bg-swap-strength" data-output="studio-bg-swap-strength-value" type="range" min="0" max="1" step="0.05" value="1">
+              </label>
+            </section>
+            <section class="studio-background-card">
+              <h5>Original background color <span class="column-help-icon" title="Keeps the original background geometry fixed while changing only its hue, saturation, inversion, or white balance. The fruit pixels are preserved.">?</span></h5>
+              <label for="studio-bg-color-prob">Probability
+                <input id="studio-bg-color-prob" type="number" min="0" max="1" step="0.05" value="0.18">
+              </label>
+              <label class="studio-strength-row" for="studio-bg-color-strength">Strength <span id="studio-bg-color-strength-value" class="studio-strength-value">65%</span>
+                <input id="studio-bg-color-strength" data-output="studio-bg-color-strength-value" type="range" min="0" max="1" step="0.05" value="0.65">
+              </label>
+            </section>
+            <section class="studio-background-card">
+              <h5>Blank color <span class="column-help-icon" title="Replaces the background with black, white, gray, or another simple flat color. Strength blends between the original and blank background.">?</span></h5>
+              <label for="studio-bg-solid-prob">Probability
+                <input id="studio-bg-solid-prob" type="number" min="0" max="1" step="0.05" value="0.08">
+              </label>
+              <label class="studio-strength-row" for="studio-bg-solid-strength">Strength <span id="studio-bg-solid-strength-value" class="studio-strength-value">100%</span>
+                <input id="studio-bg-solid-strength" data-output="studio-bg-solid-strength-value" type="range" min="0" max="1" step="0.05" value="1">
+              </label>
+            </section>
+            <section class="studio-background-card">
+              <h5>Table/counter surface <span class="column-help-icon" title="Synthesizes wood, stone, tile, laminate, or stainless-like surfaces behind the fruit. Strength controls replacement amount and texture variation.">?</span></h5>
+              <label for="studio-bg-surface-prob">Probability
+                <input id="studio-bg-surface-prob" type="number" min="0" max="1" step="0.05" value="0.18">
+              </label>
+              <label class="studio-strength-row" for="studio-bg-surface-strength">Strength <span id="studio-bg-surface-strength-value" class="studio-strength-value">75%</span>
+                <input id="studio-bg-surface-strength" data-output="studio-bg-surface-strength-value" type="range" min="0" max="1" step="0.05" value="0.75">
+              </label>
+            </section>
+            <section class="studio-background-card">
+              <h5>Non-produce clutter <span class="column-help-icon" title="Adds only non-food distractors behind the fruit, including hands, hands holding cards/rulers/phones/labels/tools, tape, utensils, cables, clips, and geometric containers. No fruits or vegetables are generated. Strength controls item count, size, and opacity.">?</span></h5>
+              <label for="studio-bg-clutter-prob">Probability
+                <input id="studio-bg-clutter-prob" type="number" min="0" max="1" step="0.05" value="0.25">
+              </label>
+              <label class="studio-strength-row" for="studio-bg-clutter-strength">Strength <span id="studio-bg-clutter-strength-value" class="studio-strength-value">55%</span>
+                <input id="studio-bg-clutter-strength" data-output="studio-bg-clutter-strength-value" type="range" min="0" max="1" step="0.05" value="0.55">
+              </label>
+            </section>
+            <section class="studio-background-card">
+              <h5>Out-of-context objects <span class="column-help-icon" title="Adds from a catalog of 100 deliberately irrelevant non-produce subjects across animals, vehicles, sports gear, household items, electronics, outdoor objects, toys, and instruments. This is independent from ordinary workspace clutter and teaches the model to ignore unexpected objects.">?</span></h5>
+              <label for="studio-bg-novelty-prob">Probability
+                <input id="studio-bg-novelty-prob" type="number" min="0" max="1" step="0.05" value="0.12">
+              </label>
+              <label class="studio-strength-row" for="studio-bg-novelty-strength">Strength <span id="studio-bg-novelty-strength-value" class="studio-strength-value">55%</span>
+                <input id="studio-bg-novelty-strength" data-output="studio-bg-novelty-strength-value" type="range" min="0" max="1" step="0.05" value="0.55">
+              </label>
+            </section>
+          </div>
         </div>
         <div class="studio-augment-preview-actions">
           <button id="studio-augment-preview-btn" type="button">Preview augmentations</button>
@@ -783,7 +851,85 @@
   <div id="lightbox" class="lightbox-overlay">
     <span class="lightbox-close" id="lightbox-close">&times;</span>
     <div class="lightbox-status" id="lightbox-status" role="status"></div>
+    <button type="button" id="lightbox-adjust-btn" class="lightbox-adjust-btn">Adjust Features</button>
+    <div id="lightbox-zoom-controls" class="lightbox-zoom-controls" aria-label="Preview zoom controls">
+      <button type="button" id="lightbox-zoom-out" aria-label="Zoom out">&minus;</button>
+      <button type="button" id="lightbox-zoom-reset" aria-label="Reset zoom">100%</button>
+      <button type="button" id="lightbox-zoom-in" aria-label="Zoom in">+</button>
+    </div>
     <img class="lightbox-content" id="lightbox-img">
+  </div>
+
+  <div id="adjustment-modal" class="adjustment-modal" aria-hidden="true">
+    <section class="adjustment-dialog" role="dialog" aria-modal="true" aria-labelledby="adjustment-title">
+      <header class="adjustment-header">
+        <div>
+          <h2 id="adjustment-title">Adjust Features</h2>
+          <p id="adjustment-subtitle" class="muted"></p>
+        </div>
+        <button type="button" id="adjustment-close-btn" class="adjustment-icon-btn" aria-label="Close adjustment editor">&times;</button>
+      </header>
+      <div class="adjustment-mode-tabs">
+        <button type="button" id="adjustment-mask-mode-btn" class="active">Masks</button>
+        <button type="button" id="adjustment-smoothing-mode-btn">Smoothing Curve</button>
+        <button type="button" id="adjustment-traditional-mode-btn">Legacy Features (TA)</button>
+      </div>
+      <div class="adjustment-body">
+        <div class="adjustment-canvas-column">
+          <div class="adjustment-canvas-toolbar">
+            <span id="adjustment-mask-tools">
+              <button type="button" id="adjustment-brush-btn" class="active">Brush</button>
+              <button type="button" id="adjustment-eraser-btn">Eraser</button>
+              <button type="button" id="adjustment-undo-btn">Undo</button>
+              <button type="button" id="adjustment-redo-btn">Redo</button>
+              <label>Size <input id="adjustment-brush-size" type="range" min="3" max="250" value="40"></label>
+            </span>
+            <span class="adjustment-zoom-tools">
+              <button type="button" id="adjustment-zoom-out-btn" aria-label="Zoom out">&minus;</button>
+              <span id="adjustment-zoom-value">100%</span>
+              <button type="button" id="adjustment-zoom-in-btn" aria-label="Zoom in">+</button>
+              <button type="button" id="adjustment-zoom-reset-btn" aria-label="Reset zoom">&#8634;</button>
+            </span>
+          </div>
+          <div id="adjustment-canvas-host" class="adjustment-canvas-host">
+            <canvas id="adjustment-canvas"></canvas>
+            <p id="adjustment-canvas-status">Loading editable artifacts...</p>
+          </div>
+        </div>
+        <aside class="adjustment-sidebar">
+          <div id="adjustment-mask-panel">
+            <h3>Mask Layer</h3>
+            <div id="adjustment-layer-buttons" class="adjustment-layer-buttons"></div>
+            <label class="adjustment-range-label">Selected mask opacity
+              <input id="adjustment-opacity" type="range" min="10" max="100" value="55">
+            </label>
+            <p class="muted">Paint the whole-fruit and two flesh masks. Saved corrections recalculate this row and become approved examples for model fine-tuning.</p>
+          </div>
+          <div id="adjustment-traditional-panel" hidden>
+            <h3>Draggable Controls</h3>
+            <div id="adjustment-traditional-values" class="adjustment-traditional-values"></div>
+            <p class="muted">Drag the colored handles on the actual fruit axes. Width and indentation handles move along the height axis; angle-span handles move along the width axis.</p>
+          </div>
+          <div id="adjustment-smoothing-panel" hidden>
+            <h3>Smoothing Curve</h3>
+            <div class="adjustment-curve-layers">
+              <button type="button" id="adjustment-rind-curve-btn" class="active">Rind curve</button>
+              <button type="button" id="adjustment-flesh-curve-btn">Flesh curve</button>
+            </div>
+            <button type="button" id="adjustment-clear-anchors-btn">Clear curve anchors</button>
+            <p class="muted">Drag anywhere along the selected fitted curve. Each dragged point becomes a weighted fitting constraint; saving refits all smoothing parameters together.</p>
+            <div id="adjustment-anchor-count" class="adjustment-anchor-count"></div>
+          </div>
+          <div id="adjustment-status" class="adjustment-status" role="status"></div>
+        </aside>
+      </div>
+      <footer class="adjustment-footer">
+        <button type="button" id="adjustment-cancel-btn">Cancel</button>
+        <button type="button" id="adjustment-save-row-btn" class="primary">Save This Image</button>
+        <button type="button" id="adjustment-save-batch-btn" class="primary secondary" hidden>Apply TA Settings to Batch</button>
+        <button type="button" id="adjustment-finetune-btn" class="finetune" hidden>Fine-tune Saved Corrections</button>
+      </footer>
+    </section>
   </div>
   
   <!-- Auto-busts local app assets so deployments do not need manual cache stamps. -->
@@ -793,6 +939,11 @@
     appScript.onload = () => {
       const studioScript = document.createElement("script");
       studioScript.src = `labeling.js?v=${window.APP_ASSET_VERSION || Date.now()}`;
+      studioScript.onload = () => {
+        const adjustmentScript = document.createElement("script");
+        adjustmentScript.src = `adjustments.js?v=${window.APP_ASSET_VERSION || Date.now()}`;
+        document.body.appendChild(adjustmentScript);
+      };
       document.body.appendChild(studioScript);
     };
     document.body.appendChild(appScript);
