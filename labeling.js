@@ -102,6 +102,18 @@
             trainJobMeta: el("studio-train-job-meta"),
             trainJobFill: el("studio-train-job-fill"),
             modelPlan: el("studio-model-plan"),
+            syncPanel: el("studio-sync-panel"),
+            syncRefreshBtn: el("studio-sync-refresh-btn"),
+            syncPushBtn: el("studio-sync-push-btn"),
+            syncPullBtn: el("studio-sync-pull-btn"),
+            syncExportBtn: el("studio-sync-export-btn"),
+            syncImportInput: el("studio-sync-import-input"),
+            syncReplace: el("studio-sync-replace"),
+            syncStatus: el("studio-sync-status"),
+            syncLocalDatasets: el("studio-sync-local-datasets"),
+            syncLocalExperts: el("studio-sync-local-experts"),
+            syncRemoteDatasets: el("studio-sync-remote-datasets"),
+            syncRemoteExperts: el("studio-sync-remote-experts"),
             status: el("studio-status"),
             queueList: el("studio-queue-list"),
             prelabelBtn: el("studio-prelabel-btn"),
@@ -147,6 +159,11 @@
         return `${proxyBaseUrl()}/${prefix}${path || ""}`;
     }
 
+    function syncApiUrl(path) {
+        const prefix = usesProxyApi() ? "proxy_sync" : "sync";
+        return `${proxyBaseUrl()}/${prefix}${path || ""}`;
+    }
+
     function authQuery() {
         return `password=${encodeURIComponent(currentPassword)}&username=${encodeURIComponent(currentUsername)}`;
     }
@@ -176,12 +193,192 @@
         return response.json();
     }
 
+    async function syncGetJson(path) {
+        const sep = path.includes("?") ? "&" : "?";
+        const response = await fetch(`${syncApiUrl(path)}${sep}${authQuery()}`);
+        if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+        return response.json();
+    }
+
+    async function syncPostJson(path, body, expectBlob = false) {
+        const response = await fetch(syncApiUrl(path), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...body, password: currentPassword, username: currentUsername })
+        });
+        if (!response.ok) {
+            let detail = "";
+            try {
+                const data = await response.json();
+                detail = data.detail || data.message || "";
+            } catch (_err) {}
+            throw new Error(detail || `Server responded with ${response.status}`);
+        }
+        return expectBlob ? response.blob() : response.json();
+    }
+
     async function apiSendForm(path, method, formData) {
         formData.append("password", currentPassword);
         formData.append("username", currentUsername);
         const response = await fetch(datasetApiUrl(path), { method, body: formData });
         if (!response.ok) throw new Error(`Server responded with ${response.status}`);
         return response.json();
+    }
+
+    function syncAllowed() {
+        return typeof isDevUser === "function" && isDevUser();
+    }
+
+    function setSyncStatus(message, isError = false) {
+        const d = dom();
+        if (!d.syncStatus) return;
+        d.syncStatus.innerText = message || "";
+        d.syncStatus.style.color = isError ? "#c7362f" : "";
+    }
+
+    function renderSyncList(container, items, source, kind) {
+        if (!container) return;
+        const list = Array.isArray(items) ? items : [];
+        if (!list.length) {
+            container.innerHTML = `<span class="muted">No ${kind === "datasets" ? "datasets" : "models"} found.</span>`;
+            return;
+        }
+        container.innerHTML = list.map((item) => {
+            const id = item.dataset_id || item.id || "";
+            const title = item.name || item.id || item.dataset_id || "Unnamed";
+            const fruit = String(item.fruit_type || "").replace(/_/g, " ") || "unknown fruit";
+            const meta = kind === "datasets"
+                ? `${fruit} · ${item.owner_username || "global"} · ${item.image_count || 0} images`
+                : `${fruit} · v${item.version || "?"} · ${item.status || "unknown"}`;
+            return `<label class="studio-sync-item">
+                <input type="checkbox" data-sync-source="${source}" data-sync-kind="${kind}" value="${esc(id)}">
+                <span>${esc(title)}<small>${esc(id)} · ${esc(meta)}</small></span>
+            </label>`;
+        }).join("");
+    }
+
+    async function refreshSyncInventory() {
+        const d = dom();
+        if (!syncAllowed()) {
+            if (d.syncPanel) d.syncPanel.classList.remove("visible");
+            return;
+        }
+        if (d.syncPanel) d.syncPanel.classList.add("visible");
+        try {
+            if (d.syncRefreshBtn) d.syncRefreshBtn.disabled = true;
+            setSyncStatus("Loading sync inventory...");
+            const [local, remote] = await Promise.all([
+                syncGetJson("/inventory"),
+                syncGetJson("/remote_inventory"),
+            ]);
+            if (local.success === false) throw new Error(local.message || "Could not load local inventory.");
+            renderSyncList(d.syncLocalDatasets, local.datasets, "local", "datasets");
+            renderSyncList(d.syncLocalExperts, local.experts, "local", "experts");
+            if (remote.success === false) {
+                renderSyncList(d.syncRemoteDatasets, [], "remote", "datasets");
+                renderSyncList(d.syncRemoteExperts, [], "remote", "experts");
+                setSyncStatus(remote.message || "Production inventory unavailable.", true);
+                return;
+            }
+            renderSyncList(d.syncRemoteDatasets, remote.datasets, "remote", "datasets");
+            renderSyncList(d.syncRemoteExperts, remote.experts, "remote", "experts");
+            setSyncStatus("Sync inventory loaded.");
+        } catch (err) {
+            setSyncStatus(`Sync inventory failed: ${err.message}`, true);
+        } finally {
+            if (d.syncRefreshBtn) d.syncRefreshBtn.disabled = false;
+        }
+    }
+
+    function selectedSyncIds(source, kind) {
+        return [...document.querySelectorAll(`input[data-sync-source="${source}"][data-sync-kind="${kind}"]:checked`)]
+            .map((input) => input.value)
+            .filter(Boolean);
+    }
+
+    function syncPayloadFor(source) {
+        const d = dom();
+        return {
+            dataset_ids: selectedSyncIds(source, "datasets"),
+            expert_ids: selectedSyncIds(source, "experts"),
+            conflict_mode: d.syncReplace?.checked ? "replace" : "skip"
+        };
+    }
+
+    function ensureSyncSelection(payload, directionLabel) {
+        if ((payload.dataset_ids || []).length || (payload.expert_ids || []).length) return true;
+        setSyncStatus(`Select at least one dataset or model to ${directionLabel}.`, true);
+        return false;
+    }
+
+    async function pushSelectedToProduction() {
+        const payload = syncPayloadFor("local");
+        if (!ensureSyncSelection(payload, "push")) return;
+        try {
+            setSyncStatus("Pushing selected dev items to production...");
+            const result = await syncPostJson("/push_prod", payload);
+            if (result.success === false) throw new Error(result.message || "Push failed.");
+            setSyncStatus("Push complete. Refreshing inventories...");
+            await refreshSyncInventory();
+        } catch (err) {
+            setSyncStatus(`Push failed: ${err.message}`, true);
+        }
+    }
+
+    async function pullSelectedFromProduction() {
+        const payload = syncPayloadFor("remote");
+        if (!ensureSyncSelection(payload, "pull")) return;
+        try {
+            setSyncStatus("Pulling selected production items into dev...");
+            const result = await syncPostJson("/pull_prod", payload);
+            if (result.success === false) throw new Error(result.message || "Pull failed.");
+            setSyncStatus("Pull complete. Refreshing inventories...");
+            await refreshSyncInventory();
+        } catch (err) {
+            setSyncStatus(`Pull failed: ${err.message}`, true);
+        }
+    }
+
+    async function exportSelectedDevBundle() {
+        const payload = syncPayloadFor("local");
+        if (!ensureSyncSelection(payload, "export")) return;
+        try {
+            setSyncStatus("Building dev sync bundle...");
+            const blob = await syncPostJson("/export", { ...payload, source_label: "dev" }, true);
+            const objectUrl = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = objectUrl;
+            anchor.download = `fruitphenome_dev_sync_${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(objectUrl);
+            setSyncStatus("Dev sync bundle downloaded.");
+        } catch (err) {
+            setSyncStatus(`Export failed: ${err.message}`, true);
+        }
+    }
+
+    async function importBundleToDev(file) {
+        if (!file) return;
+        const d = dom();
+        const form = new FormData();
+        form.append("bundle", file);
+        form.append("password", currentPassword);
+        form.append("username", currentUsername);
+        form.append("conflict_mode", d.syncReplace?.checked ? "replace" : "skip");
+        try {
+            setSyncStatus("Importing bundle into dev...");
+            const response = await fetch(syncApiUrl("/import"), { method: "POST", body: form });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || result.success === false) throw new Error(result.message || `Server responded with ${response.status}`);
+            setSyncStatus("Bundle imported into dev. Refreshing inventories...");
+            await refreshSyncInventory();
+        } catch (err) {
+            setSyncStatus(`Import failed: ${err.message}`, true);
+        } finally {
+            if (d.syncImportInput) d.syncImportInput.value = "";
+        }
     }
 
     // --- Dataset management ---
@@ -1231,6 +1428,12 @@
         if (d.augmentExportBtn) d.augmentExportBtn.disabled = !currentDatasetId;
         if (d.finetuneBtn) d.finetuneBtn.disabled = !currentDatasetId;
         if (d.augmentPreviewBtn) d.augmentPreviewBtn.disabled = !currentDatasetId;
+        if (d.syncPanel) d.syncPanel.classList.toggle("visible", syncAllowed());
+        if (d.syncRefreshBtn) d.syncRefreshBtn.disabled = !syncAllowed();
+        if (d.syncPushBtn) d.syncPushBtn.disabled = !syncAllowed();
+        if (d.syncPullBtn) d.syncPullBtn.disabled = !syncAllowed();
+        if (d.syncExportBtn) d.syncExportBtn.disabled = !syncAllowed();
+        if (d.syncImportInput) d.syncImportInput.disabled = !syncAllowed();
         if (d.zoomInBtn) d.zoomInBtn.disabled = !hasImage || zoomLevel >= 8;
         if (d.zoomOutBtn) d.zoomOutBtn.disabled = !hasImage || zoomLevel <= 1;
         if (d.zoomResetBtn) d.zoomResetBtn.disabled = !hasImage || (zoomLevel === 1 && panX === 0 && panY === 0);
@@ -1322,6 +1525,11 @@
         d.augmentExportBtn?.addEventListener("click", augmentExportZip);
         d.augmentPreviewBtn?.addEventListener("click", previewAugmentations);
         d.finetuneBtn?.addEventListener("click", () => startFinetune());
+        d.syncRefreshBtn?.addEventListener("click", refreshSyncInventory);
+        d.syncPushBtn?.addEventListener("click", pushSelectedToProduction);
+        d.syncPullBtn?.addEventListener("click", pullSelectedFromProduction);
+        d.syncExportBtn?.addEventListener("click", exportSelectedDevBundle);
+        d.syncImportInput?.addEventListener("change", (e) => importBundleToDev(e.target.files?.[0]));
         d.datasetSelect?.addEventListener("change", async (e) => {
             if (e.target.value === "__new__") {
                 const previous = currentDatasetId || "";
