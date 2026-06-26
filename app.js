@@ -2045,6 +2045,17 @@ function captureBatchScrollAnchor() {
     }
 
     if (belowTable) {
+        const charts = document.getElementById("histograms-container");
+        if (charts) {
+            return {
+                active: true,
+                mode: "below-table-content",
+                selector: "#histograms-container",
+                viewportTop: charts.getBoundingClientRect().top,
+                scrollY: window.scrollY,
+                horizontal
+            };
+        }
         return {
             active: true,
             mode: "below-table",
@@ -2115,6 +2126,16 @@ function restoreBatchScrollAnchor(anchor) {
             window.scrollTo({ top: Math.max(0, anchor.scrollY + nextHeight - (anchor.tableHeight || 0)), behavior: "auto" });
             return;
         }
+        if (anchor.mode === "below-table-content") {
+            const target = document.querySelector(anchor.selector);
+            if (target) {
+                const nextTop = target.getBoundingClientRect().top;
+                window.scrollTo({ top: Math.max(0, window.scrollY + nextTop - anchor.viewportTop), behavior: "auto" });
+            } else {
+                window.scrollTo({ top: anchor.scrollY, behavior: "auto" });
+            }
+            return;
+        }
         if (anchor.mode === "row") {
             const row = table?.querySelector(`tbody tr[data-row-index="${anchor.rowIndex}"]`);
             if (row) {
@@ -2143,17 +2164,22 @@ function restoreBatchScrollAnchor(anchor) {
 function requestHistogramRebuild(container, options = {}) {
     const target = container || document.getElementById("histograms-container");
     const delay = options.debounce ? 350 : 0;
+    const scrollAnchor = options.scrollAnchor || null;
+    const rebuild = () => {
+        rebuildHistograms(target);
+        if (scrollAnchor) restoreBatchScrollAnchor(scrollAnchor);
+    };
     if (histogramDebounceTimer) {
         clearTimeout(histogramDebounceTimer);
         histogramDebounceTimer = null;
     }
     if (delay <= 0) {
-        rebuildHistograms(target);
+        rebuild();
         return;
     }
     histogramDebounceTimer = setTimeout(() => {
         histogramDebounceTimer = null;
-        rebuildHistograms(target);
+        rebuild();
     }, delay);
 }
 
@@ -2166,7 +2192,10 @@ function refreshBatchOutputs(chartsContainer, options = {}) {
             img.addEventListener("error", () => restoreBatchScrollAnchor(anchor), { once: true });
         }
     });
-    requestHistogramRebuild(chartsContainer || document.getElementById("histograms-container"), { debounce: Boolean(options.debounceHistograms) });
+    requestHistogramRebuild(chartsContainer || document.getElementById("histograms-container"), {
+        debounce: Boolean(options.debounceHistograms),
+        scrollAnchor: anchor
+    });
     restoreBatchScrollAnchor(anchor);
     updateBatchJumpControls();
 }
@@ -2553,6 +2582,7 @@ function makeBatchState(files, settings, requestLineOcr) {
         failureCount: 0,
         pixelScaleCount: 0,
         elapsedMs: 0,
+        serverElapsedMs: 0,
         runStartedAt: null,
         timerInterval: null,
         onDemandRunning: false,
@@ -2566,7 +2596,9 @@ function makeBatchState(files, settings, requestLineOcr) {
         finished: false,
         warmupComplete: false,
         stopRequested: false,
-        stopReason: null
+        stopReason: null,
+        uploading: false,
+        uploadProgress: null
     };
 }
 
@@ -2579,7 +2611,7 @@ function persistentRowItem(row) {
     if (row.result) {
         const item = batchResultItem({ name: row.filename }, data);
         item.success = data.success !== false;
-        item.included = data.success !== false;
+        item.included = true;
         if (!item.success) {
             item.message = `Error: ${data.message || row.message || "Processing failed"}`;
             item.notes = [item.message, rowNotes(data)].filter(Boolean).join(" | ");
@@ -2590,7 +2622,7 @@ function persistentRowItem(row) {
     return {
         file_name: row.filename,
         data,
-        included: false,
+        included: true,
         isCm: false,
         allowPixelMetrics: false,
         digits: 0,
@@ -2617,10 +2649,23 @@ function applyPersistentJob(job, { restored = false } = {}) {
     batch.nextIndex = batch.completed;
     batch.successCount = Number(job.success_count || 0);
     batch.failureCount = Number(job.failure_count || 0);
-    batch.elapsedMs = Number(job.elapsed_ms || 0);
-    batch.running = ["queued", "running", "stopping"].includes(job.status);
+    const serverElapsedMs = Number(job.elapsed_ms || 0);
+    const wasRunning = Boolean(batch.running);
+    const serverElapsedChanged = batch.serverElapsedMs !== serverElapsedMs;
+    batch.serverElapsedMs = serverElapsedMs;
+    batch.elapsedMs = serverElapsedMs;
+    batch.running = ["uploading", "queued", "running", "stopping"].includes(job.status);
     batch.finished = job.status === "completed";
     batch.stopRequested = job.status === "stopping";
+    if (batch.running) {
+        if (!wasRunning || !batch.runStartedAt || serverElapsedChanged) {
+            batch.runStartedAt = Date.now();
+        }
+        startBatchLiveTimer(batch);
+    } else {
+        batch.runStartedAt = null;
+        stopBatchLiveTimer(batch);
+    }
     activeBatch = batch;
     currentSessionId = batch.sessionId;
     if (job.settings?.fruit) {
@@ -2639,7 +2684,10 @@ function applyPersistentJob(job, { restored = false } = {}) {
     globalBatchResults = rows.map(row => {
         const item = persistentRowItem(row);
         const prior = priorByRow.get(row.row_id);
-        if (prior && row.result) item.included = prior.included;
+        if (prior?.includeTouched) {
+            item.included = prior.included;
+            item.includeTouched = true;
+        }
         return item;
     });
 
@@ -2650,16 +2698,19 @@ function applyPersistentJob(job, { restored = false } = {}) {
     if (table) table.style.display = "table";
     document.getElementById("bulk-section")?.classList.add("bulk-card");
     if (timer) {
-        timer.style.display = "block";
-        const remaining = Math.max(rows.length - batch.completed, 0);
-        const eta = batch.completed > 0 ? (batch.elapsedMs / batch.completed) * remaining : null;
-        timer.innerText = batch.running
-            ? `Elapsed: ${formatDuration(batch.elapsedMs)} | ETA: ${eta === null ? "Calculating..." : formatDuration(eta)}`
-            : `Total Time: ${formatDuration(batch.elapsedMs)}`;
+        if (batch.running) {
+            updateBatchTimer(batch);
+        } else {
+            timer.style.display = "block";
+            timer.innerText = `Total Time: ${formatDuration(batch.elapsedMs)}`;
+        }
     }
     if (status) {
         const prefix = restored ? "Restored persistent job. " : "";
-        status.innerText = `${prefix}${job.message || `Job ${job.status}.`}`;
+        const warming = batch.running && batch.completed === 0 && ["queued", "running"].includes(job.status);
+        status.innerText = warming
+            ? `${prefix}Warming up server and processing the first image...`
+            : `${prefix}${job.message || `Job ${job.status}.`}`;
     }
     updateBatchControls(batch);
     updateBatchProgress(batch);
@@ -2736,7 +2787,14 @@ async function createPersistentBatchJob(files, settings) {
         }
         const status = document.getElementById("bulk-status");
         if (status) status.innerText = `Uploading batch to persistent storage: ${Math.min(start + chunkFiles.length, fileList.length)}/${fileList.length}`;
-        setProgressBar("bulk-progress", Math.min(start + chunkFiles.length, fileList.length) / fileList.length, { visible: true });
+        const uploadFraction = Math.min(start + chunkFiles.length, fileList.length) / fileList.length;
+        if (activeBatch && !activeBatch.persistentJobId) {
+            activeBatch.uploading = true;
+            activeBatch.uploadProgress = uploadFraction;
+            updateBatchProgress(activeBatch);
+        } else {
+            setProgressBar("bulk-progress", uploadFraction, { visible: true });
+        }
     }
     const startResponse = await fetch(processJobsUrl(`/${encodeURIComponent(job.job_id)}/start`), {
         method: "POST",
@@ -2745,6 +2803,10 @@ async function createPersistentBatchJob(files, settings) {
     });
     const startData = await startResponse.json();
     if (!startResponse.ok || startData.success === false) throw new Error(startData.message || `HTTP ${startResponse.status}`);
+    if (activeBatch && !activeBatch.persistentJobId) {
+        activeBatch.uploading = false;
+        activeBatch.uploadProgress = null;
+    }
     applyPersistentJob(startData.job);
     await refreshSavedJobSelector(job.job_id);
     startPersistentJobPolling(job.job_id);
@@ -2824,6 +2886,28 @@ function batchElapsedMs(batch) {
     return batch.elapsedMs + runningMs + onDemandMs;
 }
 
+function startBatchLiveTimer(batch) {
+    if (!batch) return;
+    if (batch.timerInterval) clearInterval(batch.timerInterval);
+    batch.timerInterval = setInterval(() => {
+        if (!isActiveBatch(batch)) {
+            clearInterval(batch.timerInterval);
+            batch.timerInterval = null;
+            return;
+        }
+        if (batch.running || batch.onDemandRunning) {
+            updateBatchTimer(batch);
+            updateBatchProgress(batch);
+        }
+    }, 500);
+}
+
+function stopBatchLiveTimer(batch) {
+    if (!batch?.timerInterval) return;
+    clearInterval(batch.timerInterval);
+    batch.timerInterval = null;
+}
+
 function updateBatchTimer(batch) {
     const timerDiv = document.getElementById("batch-timer");
     if (!timerDiv || !batch) return;
@@ -2855,10 +2939,25 @@ function updateBatchProgress(batch) {
         return;
     }
 
+    if (batch.uploading && Number.isFinite(Number(batch.uploadProgress))) {
+        setProgressBar("bulk-progress", Number(batch.uploadProgress), { visible: true });
+        return;
+    }
+
     const total = Math.max(batch.files?.length || 0, 1);
     const completed = batch.finished ? total : Math.min(batch.completed || 0, total);
     const shouldShow = Boolean(batch.running || batch.completed > 0 || batch.finished);
-    setProgressBar("bulk-progress", completed / total, { visible: shouldShow });
+    let activeFraction = 0;
+    if (batch.running && !batch.finished && completed < total) {
+        const currentMs = batch.runStartedAt ? Date.now() - batch.runStartedAt : 0;
+        if (completed > 0) {
+            const avgMs = Math.max(1000, batch.elapsedMs / completed);
+            activeFraction = Math.min(0.92, currentMs / avgMs);
+        } else {
+            activeFraction = Math.min(0.85, currentMs / Math.max(1000, BULK_REQUEST_TIMEOUT_MS));
+        }
+    }
+    setProgressBar("bulk-progress", (completed + activeFraction) / total, { visible: shouldShow });
 }
 
 function startOnDemandBatchTimer(batch, totalRows) {
@@ -2870,10 +2969,7 @@ function startOnDemandBatchTimer(batch, totalRows) {
     updateBatchTimer(batch);
     updateBatchProgress(batch);
     if (!batch.running) {
-        if (batch.timerInterval) clearInterval(batch.timerInterval);
-        batch.timerInterval = setInterval(() => {
-            if (isActiveBatch(batch) && batch.onDemandRunning) updateBatchTimer(batch);
-        }, 1000);
+        startBatchLiveTimer(batch);
     }
 }
 
@@ -2881,10 +2977,7 @@ function finishOnDemandBatchTimer(batch) {
     if (!batch || !batch.onDemandRunning) return;
     if (!batch.running) {
         batch.elapsedMs = batchElapsedMs(batch);
-        if (batch.timerInterval) {
-            clearInterval(batch.timerInterval);
-            batch.timerInterval = null;
-        }
+        stopBatchLiveTimer(batch);
     }
     batch.onDemandRunning = false;
     batch.onDemandStartedAt = null;
@@ -2949,10 +3042,7 @@ function stopActiveBatch(reason = "stopped") {
         batch.onDemandAbortController.abort();
     }
     if (reason === "replaced") {
-        if (batch.timerInterval) {
-            clearInterval(batch.timerInterval);
-            batch.timerInterval = null;
-        }
+        stopBatchLiveTimer(batch);
         batch.elapsedMs = batchElapsedMs(batch);
         batch.running = false;
         batch.onDemandRunning = false;
@@ -3008,17 +3098,12 @@ async function flushDevQueue() {
 function finishBatch(batch, mode) {
     if (!isActiveBatch(batch)) return;
 
-    if (batch.timerInterval) {
-        clearInterval(batch.timerInterval);
-        batch.timerInterval = null;
-    }
+    stopBatchLiveTimer(batch);
     batch.elapsedMs = batchElapsedMs(batch);
     batch.running = false;
     batch.runStartedAt = null;
     if (batch.onDemandRunning && !batch.timerInterval) {
-        batch.timerInterval = setInterval(() => {
-            if (isActiveBatch(batch) && batch.onDemandRunning) updateBatchTimer(batch);
-        }, 1000);
+        startBatchLiveTimer(batch);
     }
 
     const status = document.getElementById("bulk-status");
@@ -3118,7 +3203,7 @@ function addBatchRetrying(file, message = BULK_RETRY_MESSAGE) {
     globalBatchResults.push({
         file_name: file.name,
         data,
-        included: false,
+        included: true,
         isCm: false,
         allowPixelMetrics: true,
         digits: 0,
@@ -3445,7 +3530,12 @@ function renderTableHeader() {
     const thead = table.querySelector("thead");
     thead.innerHTML = `
         <tr>
-            <th>Include</th>
+            <th>
+                <span class="column-title-wrap">
+                    <span>Include</span>
+                    <span class="column-help-icon" title="Checked rows are included in histograms and CSV export. Rows are selected by default; uncheck a row to temporarily exclude it without deleting the result.">?</span>
+                </span>
+            </th>
             <th>Filename</th>
             <th class="processing-log-cell">
                 <span class="column-title-wrap">
@@ -3589,9 +3679,13 @@ function virtualTableRange(table, columns) {
     const tableTop = window.scrollY + table.getBoundingClientRect().top;
     const viewportTop = window.scrollY;
     const viewportBottom = viewportTop + window.innerHeight;
-    const start = Math.max(0, Math.floor((viewportTop - tableTop) / rowHeight) - VIRTUAL_TABLE_BUFFER_ROWS);
-    const visibleCount = Math.ceil((viewportBottom - tableTop) / rowHeight) - start + VIRTUAL_TABLE_BUFFER_ROWS;
-    const end = Math.min(total, Math.max(start + 1, start + visibleCount));
+    const rawStart = Math.floor((viewportTop - tableTop) / rowHeight) - VIRTUAL_TABLE_BUFFER_ROWS;
+    const start = Math.max(0, Math.min(total - 1, rawStart));
+    const visibleCount = Math.max(
+        1,
+        Math.ceil((viewportBottom - tableTop) / rowHeight) - start + VIRTUAL_TABLE_BUFFER_ROWS
+    );
+    const end = Math.min(total, start + visibleCount);
 
     return {
         start,
@@ -3628,8 +3722,9 @@ function renderBulkRow(item, idx, columns) {
         `;
     } else if (item.retrying) {
         tr.classList.add("retry-row");
+        if (!item.included) tr.classList.add("excluded-row");
         tr.innerHTML = `
-            <td>-</td>
+            <td><input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}"></td>
             <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
             ${renderProcessingLogCell(item)}
             ${columnCells}
@@ -3838,10 +3933,7 @@ async function runBatch(batch) {
     updateBatchControls(batch);
     updateBatchProgress(batch);
 
-    if (batch.timerInterval) clearInterval(batch.timerInterval);
-    batch.timerInterval = setInterval(() => {
-        if (isActiveBatch(batch) && batch.running) updateBatchTimer(batch);
-    }, 1000);
+    startBatchLiveTimer(batch);
 
     await warmUpBatch(batch, status);
 
@@ -3956,10 +4048,26 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     renderBulkTable();
     updateBatchJumpControls();
     status.innerText = "Uploading batch to persistent backend storage...";
+    activeBatch = makeBatchState(Array.from(files), batchSettings, shouldRequestLineOcr(selectedPreviewIds(), batchSettings));
+    activeBatch.running = true;
+    activeBatch.uploading = true;
+    activeBatch.uploadProgress = 0;
+    activeBatch.runStartedAt = Date.now();
+    updateBatchControls(activeBatch);
+    updateBatchTimer(activeBatch);
+    updateBatchProgress(activeBatch);
+    startBatchLiveTimer(activeBatch);
     try {
         await createPersistentBatchJob(files, batchSettings);
     } catch (err) {
         status.innerText = `Could not create persistent processing job: ${err.message}`;
+        if (activeBatch && !activeBatch.persistentJobId) {
+            stopBatchLiveTimer(activeBatch);
+            activeBatch.running = false;
+            activeBatch.uploading = false;
+            activeBatch.runStartedAt = null;
+            updateBatchControls(activeBatch);
+        }
         setProgressBar("bulk-progress", 0, { visible: false });
     }
 });
@@ -4013,6 +4121,7 @@ document.querySelector("#bulk-table tbody").addEventListener("change", (e) => {
         const tr = e.target.closest("tr");
         
         globalBatchResults[idx].included = e.target.checked;
+        globalBatchResults[idx].includeTouched = true;
         if (e.target.checked) {
             tr.classList.remove("excluded-row");
         } else {

@@ -20,6 +20,9 @@
     };
     const MAX_DISPLAY_SIDE = 860;
     const MAX_UNDO = 14;
+    const DOUBLE_CLICK_MS = 260;
+    const STROKE_DRAG_THRESHOLD_PX = 3;
+    const TRAIN_TERMINAL_STATUSES = new Set(["promoted", "rejected", "failed"]);
 
     // --- State ---
     let currentDatasetId = null;
@@ -44,6 +47,12 @@
     let painting = false;
     let lastPt = null;
     let strokeBefore = null;       // ImageData snapshot of active layer at stroke start
+    let strokeLayer = null;
+    let strokeTool = null;
+    let strokeBrushSize = null;
+    let pendingStroke = null;
+    let pendingTapStroke = null;
+    let suppressNextDblClickUntil = 0;
     let undoStack = [];            // [{layer, data: ImageData}]
     let redoStack = [];
     let dirty = false;             // unsaved edits present
@@ -51,6 +60,10 @@
 
     let datasetsLoaded = false;
     let displayCtx = null;
+    let activeTrainJobId = null;
+    let activeTrainJobStartedAt = null;
+    let activeTrainJobLatest = null;
+    let activeTrainJobTimer = null;
 
     // --- DOM ---
     const el = (id) => document.getElementById(id);
@@ -86,6 +99,7 @@
             finetuneBtn: el("studio-finetune-btn"),
             trainJob: el("studio-train-job"),
             trainJobText: el("studio-train-job-text"),
+            trainJobMeta: el("studio-train-job-meta"),
             trainJobFill: el("studio-train-job-fill"),
             modelPlan: el("studio-model-plan"),
             status: el("studio-status"),
@@ -476,7 +490,8 @@
             const data = await apiPostJson(`/${currentDatasetId}/augment_preview`, readAugmentOptions());
             if (!data.success) throw new Error(data.message || "Could not generate preview.");
             const src = `data:image/jpeg;base64,${data.image_base64}`;
-            d.augmentPreview.innerHTML = `<img class="preview-img" src="${src}" alt="Augmentation contact sheet" title="Open full-size augmentation preview">`;
+            const fullSrc = data.full_image_base64 ? `data:image/jpeg;base64,${data.full_image_base64}` : src;
+            d.augmentPreview.innerHTML = `<img class="preview-img" src="${src}" data-full-src="${fullSrc}" alt="Augmentation contact sheet" title="Open full-size augmentation preview">`;
             d.augmentPreview.classList.add("visible");
             if (d.augmentPreviewStatus) {
                 d.augmentPreviewStatus.innerText = `${data.count || 0} examples generated with the current settings.`;
@@ -500,10 +515,64 @@
         return `${proxyBaseUrl()}/train_jobs`;
     }
 
+    function formatTrainDuration(ms) {
+        const elapsedSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+        const h = String(Math.floor(elapsedSec / 3600)).padStart(2, "0");
+        const m = String(Math.floor((elapsedSec % 3600) / 60)).padStart(2, "0");
+        const s = String(elapsedSec % 60).padStart(2, "0");
+        return `${h}:${m}:${s}`;
+    }
+
+    function trainJobStartMs(job) {
+        const parsed = Date.parse(job?.created_at || "");
+        return Number.isFinite(parsed) ? parsed : Date.now();
+    }
+
+    function trainJobElapsedMs() {
+        return activeTrainJobStartedAt ? Math.max(0, Date.now() - activeTrainJobStartedAt) : 0;
+    }
+
+    function stopTrainJobTimer() {
+        if (activeTrainJobTimer) {
+            clearInterval(activeTrainJobTimer);
+            activeTrainJobTimer = null;
+        }
+    }
+
+    function updateTrainJobTimingDisplay(job = activeTrainJobLatest) {
+        const d = dom();
+        if (!d.trainJobMeta || !job) return;
+        const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+        const elapsedMs = trainJobElapsedMs();
+        const terminal = TRAIN_TERMINAL_STATUSES.has(String(job.status || ""));
+        let etaText = "Calculating...";
+        if (terminal || progress >= 100) {
+            etaText = "00:00:00";
+        } else if (progress > 0) {
+            etaText = formatTrainDuration(elapsedMs * (100 - progress) / progress);
+        }
+        d.trainJobMeta.innerText = terminal
+            ? `Total time: ${formatTrainDuration(elapsedMs)}`
+            : `Elapsed: ${formatTrainDuration(elapsedMs)} | ETA: ${etaText}`;
+    }
+
+    function startTrainJobTimer(job) {
+        if (!job?.job_id) return;
+        if (activeTrainJobId !== job.job_id) {
+            activeTrainJobId = job.job_id;
+            activeTrainJobStartedAt = trainJobStartMs(job);
+        }
+        if (!activeTrainJobTimer) {
+            activeTrainJobTimer = setInterval(() => updateTrainJobTimingDisplay(), 1000);
+        }
+    }
+
     function renderTrainJob(job) {
         const d = dom();
         if (!d.trainJob || !job) return;
         d.trainJob.classList.add("visible");
+        activeTrainJobLatest = job;
+        startTrainJobTimer(job);
         const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
         if (d.trainJobFill) d.trainJobFill.style.width = `${progress}%`;
         if (d.trainJobText) {
@@ -515,6 +584,8 @@
             }
             d.trainJobText.innerText = `${status}${job.message || ""} (${progress}%)${extra}`;
         }
+        updateTrainJobTimingDisplay(job);
+        if (TRAIN_TERMINAL_STATUSES.has(String(job.status || ""))) stopTrainJobTimer();
         if (job.base_id && (job.candidate_expert_id || job.expert_id) && d.modelPlan) {
             d.modelPlan.innerText = `Training job: ${job.base_id} → ${job.candidate_expert_id || job.expert_id}.`;
         }
@@ -588,6 +659,16 @@
             renderTrainJob(data.job);
             return await pollTrainJob(data.job.job_id);
         } catch (err) {
+            stopTrainJobTimer();
+            if (activeTrainJobLatest) {
+                activeTrainJobLatest = {
+                    ...activeTrainJobLatest,
+                    status: "failed",
+                    message: err.message || "Training failed.",
+                    progress: activeTrainJobLatest.progress || 0
+                };
+                renderTrainJob(activeTrainJobLatest);
+            }
             setStatus(`Fine-tune failed: ${err.message}`, true);
             return null;
         } finally {
@@ -604,6 +685,14 @@
         redoStack = [];
         dirty = false;
         hoverPt = null;
+        clearPendingTapStroke();
+        pendingStroke = null;
+        painting = false;
+        lastPt = null;
+        strokeBefore = null;
+        strokeLayer = null;
+        strokeTool = null;
+        strokeBrushSize = null;
         LAYERS.forEach((layer) => { delete layerCanvas[layer]; });
         if (d.canvas) {
             d.canvas.width = 0;
@@ -651,6 +740,10 @@
             undoStack = [];
             redoStack = [];
             dirty = false;
+            clearPendingTapStroke();
+            pendingStroke = null;
+            painting = false;
+            lastPt = null;
 
             const maskData = await apiGetJson(`/${currentDatasetId}/images/${imageId}/masks`);
             if (maskData && maskData.success && maskData.layers) {
@@ -725,6 +818,10 @@
         panMode = false;
         panning = false;
         panStart = null;
+        clearPendingTapStroke();
+        pendingStroke = null;
+        painting = false;
+        lastPt = null;
         applyViewportTransform();
     }
 
@@ -761,18 +858,18 @@
         };
     }
 
-    function paintSegment(from, to) {
-        const lctx = layerCanvas[activeLayer].getContext("2d");
+    function paintSegment(from, to, layer = activeLayer, mode = tool, size = brushSize) {
+        const lctx = layerCanvas[layer].getContext("2d");
         lctx.lineCap = "round";
         lctx.lineJoin = "round";
-        lctx.lineWidth = brushSize;
-        if (tool === "eraser") {
+        lctx.lineWidth = size;
+        if (mode === "eraser") {
             lctx.globalCompositeOperation = "destination-out";
             lctx.strokeStyle = "rgba(0,0,0,1)";
             lctx.fillStyle = "rgba(0,0,0,1)";
         } else {
             lctx.globalCompositeOperation = "source-over";
-            const [r, g, b] = LAYER_COLORS[activeLayer];
+            const [r, g, b] = LAYER_COLORS[layer];
             lctx.strokeStyle = `rgb(${r},${g},${b})`;
             lctx.fillStyle = `rgb(${r},${g},${b})`;
         }
@@ -787,14 +884,100 @@
         lctx.globalCompositeOperation = "source-over";
     }
 
+    function clearPendingTapStroke() {
+        if (!pendingTapStroke) return;
+        window.clearTimeout(pendingTapStroke.timer);
+        pendingTapStroke = null;
+    }
+
+    function commitTapStroke(entry) {
+        if (!entry || !baseImage || !layerCanvas[entry.layer]) return;
+        paintSegment(entry.pt, entry.pt, entry.layer, entry.tool, entry.size);
+        composite();
+        undoStack.push({ layer: entry.layer, data: entry.before });
+        if (undoStack.length > MAX_UNDO) undoStack.shift();
+        redoStack = [];
+        dirty = true;
+        updateButtons();
+    }
+
+    function flushPendingTapStroke() {
+        if (!pendingTapStroke) return;
+        const entry = pendingTapStroke;
+        window.clearTimeout(entry.timer);
+        pendingTapStroke = null;
+        commitTapStroke(entry);
+    }
+
+    function scheduleTapStroke(stroke) {
+        clearPendingTapStroke();
+        const entry = {
+            pt: stroke.startPt,
+            layer: stroke.layer,
+            before: stroke.before,
+            tool: stroke.tool,
+            size: stroke.size,
+            timer: null
+        };
+        entry.timer = window.setTimeout(() => {
+            if (pendingTapStroke !== entry) return;
+            pendingTapStroke = null;
+            commitTapStroke(entry);
+        }, DOUBLE_CLICK_MS);
+        pendingTapStroke = entry;
+    }
+
+    function activatePanModeFromDoubleClick(event) {
+        clearPendingTapStroke();
+        pendingStroke = null;
+        painting = false;
+        lastPt = null;
+        strokeBefore = null;
+        strokeLayer = null;
+        strokeTool = null;
+        strokeBrushSize = null;
+        if (!baseImage || zoomLevel <= 1) return;
+        panMode = true;
+        suppressNextDblClickUntil = Date.now() + DOUBLE_CLICK_MS + 120;
+        setStatus("Pan mode on. Drag the image; double-click again to return to painting.");
+        beginPan(event);
+        applyViewportTransform();
+    }
+
     function beginStroke(event) {
         if (!baseImage || panMode) return;
-        painting = true;
-        const lctx = layerCanvas[activeLayer].getContext("2d");
-        strokeBefore = lctx.getImageData(0, 0, imgW, imgH);
+        if (pendingTapStroke) {
+            activatePanModeFromDoubleClick(event);
+            return;
+        }
+        flushPendingTapStroke();
         const pt = pointToImage(event);
-        lastPt = pt;
-        paintSegment(pt, pt);
+        pendingStroke = {
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startPt: pt,
+            layer: activeLayer,
+            tool,
+            size: brushSize,
+            before: layerCanvas[activeLayer].getContext("2d").getImageData(0, 0, imgW, imgH)
+        };
+        hoverPt = pt;
+        composite();
+    }
+
+    function startPendingStroke(event) {
+        if (!pendingStroke) return;
+        painting = true;
+        strokeBefore = pendingStroke.before;
+        strokeLayer = pendingStroke.layer;
+        strokeTool = pendingStroke.tool;
+        strokeBrushSize = pendingStroke.size;
+        const fromPt = pendingStroke.startPt;
+        const toPt = pointToImage(event);
+        paintSegment(fromPt, toPt, strokeLayer, strokeTool, strokeBrushSize);
+        lastPt = toPt;
+        pendingStroke = null;
         composite();
     }
 
@@ -807,22 +990,38 @@
         }
         const pt = pointToImage(event);
         hoverPt = pt;
+        if (pendingStroke && pendingStroke.pointerId === event.pointerId) {
+            const dx = event.clientX - pendingStroke.startClientX;
+            const dy = event.clientY - pendingStroke.startClientY;
+            if (Math.hypot(dx, dy) >= STROKE_DRAG_THRESHOLD_PX) {
+                startPendingStroke(event);
+            }
+        }
         if (painting && lastPt) {
-            paintSegment(lastPt, pt);
+            paintSegment(lastPt, pt, strokeLayer || activeLayer, strokeTool || tool, strokeBrushSize || brushSize);
             lastPt = pt;
         }
         composite();
     }
 
     function endStroke() {
+        if (pendingStroke) {
+            scheduleTapStroke(pendingStroke);
+            pendingStroke = null;
+            updateButtons();
+            return;
+        }
         if (!painting) return;
         painting = false;
         lastPt = null;
         if (strokeBefore) {
-            undoStack.push({ layer: activeLayer, data: strokeBefore });
+            undoStack.push({ layer: strokeLayer || activeLayer, data: strokeBefore });
             if (undoStack.length > MAX_UNDO) undoStack.shift();
             redoStack = [];
             strokeBefore = null;
+            strokeLayer = null;
+            strokeTool = null;
+            strokeBrushSize = null;
             dirty = true;
         }
         updateButtons();
@@ -885,6 +1084,7 @@
     }
 
     async function buildMaskFormData() {
+        flushPendingTapStroke();
         const formData = new FormData();
         for (const layer of LAYERS) {
             const blob = await layerToBinaryBlob(layer);
@@ -1167,8 +1367,12 @@
 
         d.canvas.addEventListener("pointerdown", (e) => {
             d.canvas.setPointerCapture(e.pointerId);
-            if (panMode || e.button === 2) beginPan(e);
-            else beginStroke(e);
+            if (panMode || e.button === 2) {
+                flushPendingTapStroke();
+                beginPan(e);
+            } else {
+                beginStroke(e);
+            }
         });
         d.canvas.addEventListener("pointermove", moveStroke);
         d.canvas.addEventListener("pointerup", () => { endStroke(); endPan(); });
@@ -1176,8 +1380,10 @@
         d.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
         d.canvas.addEventListener("dblclick", (e) => {
             e.preventDefault();
+            if (Date.now() < suppressNextDblClickUntil) return;
             if (!baseImage || zoomLevel <= 1) return;
             panMode = !panMode;
+            if (panMode) clearPendingTapStroke();
             setStatus(panMode ? "Pan mode on. Drag the image; double-click again to return to painting." : "Pan mode off.");
             applyViewportTransform();
         });
@@ -1193,7 +1399,10 @@
 
         document.addEventListener("keydown", (e) => {
             if (!document.getElementById("labeling-panel")?.classList.contains("active")) return;
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+                e.preventDefault();
+                redo();
+            } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
                 e.preventDefault();
                 if (e.shiftKey) redo(); else undo();
             } else if (e.key === "[") {

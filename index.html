@@ -36,7 +36,8 @@
     .inline-option { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; font-size: 14px; }
     .muted { color: #666; font-size: 13px; }
     .bulk-card { width: min(1680px, calc(100vw - 48px)); max-width: none; margin-left: 50%; transform: translateX(-50%); box-sizing: border-box; }
-    .table-wrap { width: 100%; overflow-x: auto; margin-top: 20px; padding-bottom: 6px; }
+    .table-wrap { width: 100%; overflow-x: auto; margin-top: 20px; padding-bottom: 6px; overflow-anchor: none; }
+    #bulk-table { overflow-anchor: none; }
     #download-csv-btn { display: none; font-weight: bold; cursor: pointer; background: #0b3d91; color: white; border: none; border-radius: 5px; }
     #download-csv-btn:hover { background: #072f70; }
     #stop-batch-btn, #resume-batch-btn, #stop-single-btn { display: none; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; }
@@ -267,6 +268,7 @@
     .studio-job.visible { display: block; }
     .studio-job-bar { height: 8px; border-radius: 999px; overflow: hidden; background: #e3eaf0; margin-top: 8px; }
     .studio-job-fill { height: 100%; width: 0%; background: #146c43; transition: width 0.25s ease; }
+    .studio-job-meta { margin-top: 5px; font-size: 12.5px; color: #496579; font-variant-numeric: tabular-nums; }
     .studio-model-plan { margin: -6px 0 16px; padding: 10px 12px; border-left: 4px solid #4b84b4; background: #f3f8fc; color: #29495f; font-size: 13px; line-height: 1.4; }
     .studio-augment-preview-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
     .studio-augment-preview-actions button { min-height: 36px; padding: 7px 12px; border: 1px solid #b9c3cc; border-radius: 6px; background: #eef1f4; color: #1e2a32; font-weight: 700; cursor: pointer; }
@@ -720,7 +722,7 @@
           <p class="muted">The four replacement probabilities form a background mix; any remaining fraction keeps the original background, and totals above 1 are normalized. Ordinary clutter and out-of-context objects are added independently and can coexist with any background. Set a probability to 0 to disable that family.</p>
           <div class="studio-background-grid">
             <section class="studio-background-card">
-              <h5>Fruit-free donor <span class="column-help-icon" title="Replaces the background with another dataset background after all annotated fruit regions have been removed. Strength controls how fully the donor replaces the original background.">?</span></h5>
+              <h5>Fruit-free donor <span class="column-help-icon" title="Replaces the background with another dataset background after all annotated fruit regions have been removed. Higher strength increases replacement opacity, so the donor background more fully overwrites the original background.">?</span></h5>
               <label for="studio-bg-prob">Probability
                 <input id="studio-bg-prob" type="number" min="0" max="1" step="0.05" value="0.25">
               </label>
@@ -729,7 +731,7 @@
               </label>
             </section>
             <section class="studio-background-card">
-              <h5>Original background color <span class="column-help-icon" title="Keeps the original background geometry fixed while changing only its hue, saturation, inversion, or white balance. The fruit pixels are preserved.">?</span></h5>
+              <h5>Original background color <span class="column-help-icon" title="Keeps the original background geometry fixed while changing only its hue, saturation, inversion, or white balance. The fruit pixels are preserved. Higher strength increases the intensity of color shifts, saturation changes, inversion, and white-balance perturbations.">?</span></h5>
               <label for="studio-bg-color-prob">Probability
                 <input id="studio-bg-color-prob" type="number" min="0" max="1" step="0.05" value="0.18">
               </label>
@@ -738,7 +740,7 @@
               </label>
             </section>
             <section class="studio-background-card">
-              <h5>Blank color <span class="column-help-icon" title="Replaces the background with black, white, gray, or another simple flat color. Strength blends between the original and blank background.">?</span></h5>
+              <h5>Blank color <span class="column-help-icon" title="Replaces the background with black, white, gray, or another simple flat color. Higher strength increases blend opacity, so the flat color more completely replaces the original background.">?</span></h5>
               <label for="studio-bg-solid-prob">Probability
                 <input id="studio-bg-solid-prob" type="number" min="0" max="1" step="0.05" value="0.08">
               </label>
@@ -747,7 +749,7 @@
               </label>
             </section>
             <section class="studio-background-card">
-              <h5>Table/counter surface <span class="column-help-icon" title="Synthesizes wood, stone, tile, laminate, or stainless-like surfaces behind the fruit. Strength controls replacement amount and texture variation.">?</span></h5>
+              <h5>Table/counter surface <span class="column-help-icon" title="Synthesizes wood, stone, tile, laminate, or stainless-like surfaces behind the fruit. Higher strength increases replacement opacity plus surface texture contrast and color variation.">?</span></h5>
               <label for="studio-bg-surface-prob">Probability
                 <input id="studio-bg-surface-prob" type="number" min="0" max="1" step="0.05" value="0.18">
               </label>
@@ -756,7 +758,7 @@
               </label>
             </section>
             <section class="studio-background-card">
-              <h5>Non-produce clutter <span class="column-help-icon" title="Adds only non-food distractors behind the fruit, including hands, hands holding cards/rulers/phones/labels/tools, tape, utensils, cables, clips, and geometric containers. No fruits or vegetables are generated. Strength controls item count, size, and opacity.">?</span></h5>
+              <h5>Non-produce clutter <span class="column-help-icon" title="Adds only non-food distractors behind the fruit, including hands, hands holding cards/rulers/phones/labels/tools, tape, utensils, cables, clips, and geometric containers. No fruits or vegetables are generated. Higher strength increases clutter frequency, item count, item size, and opacity.">?</span></h5>
               <label for="studio-bg-clutter-prob">Probability
                 <input id="studio-bg-clutter-prob" type="number" min="0" max="1" step="0.05" value="0.25">
               </label>
@@ -765,7 +767,7 @@
               </label>
             </section>
             <section class="studio-background-card">
-              <h5>Out-of-context objects <span class="column-help-icon" title="Adds from a catalog of 100 deliberately irrelevant non-produce subjects across animals, vehicles, sports gear, household items, electronics, outdoor objects, toys, and instruments. This is independent from ordinary workspace clutter and teaches the model to ignore unexpected objects.">?</span></h5>
+              <h5>Out-of-context objects <span class="column-help-icon" title="Adds from a catalog of 100 deliberately irrelevant non-produce subjects across animals, vehicles, sports gear, household items, electronics, outdoor objects, toys, and instruments. This is independent from ordinary workspace clutter. Higher strength increases object frequency, object count, object size, and opacity.">?</span></h5>
               <label for="studio-bg-novelty-prob">Probability
                 <input id="studio-bg-novelty-prob" type="number" min="0" max="1" step="0.05" value="0.12">
               </label>
@@ -787,6 +789,7 @@
       </div>
       <div id="studio-train-job" class="studio-job">
         <div id="studio-train-job-text" class="muted">Training queued.</div>
+        <div id="studio-train-job-meta" class="studio-job-meta">Elapsed: 00:00:00 | ETA: Calculating...</div>
         <div class="studio-job-bar"><div id="studio-train-job-fill" class="studio-job-fill"></div></div>
       </div>
 
