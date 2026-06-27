@@ -482,6 +482,7 @@ function shouldRequestLineOcr(previewIds = [], settings = null) {
     const snapshot = settings || getAnalysisSettingsSnapshot();
     const explicitOcrOutputRequested = previewIds.includes("image_line_ocr_base64")
         || previewIds.includes("image_ocr_dbnet_base64")
+        || previewIds.includes("image_combined_base64")
         || (typeof visibleColumnIds !== "undefined" && (
             visibleColumnIds.has("line")
             || visibleColumnIds.has("line_confidence")
@@ -1437,6 +1438,7 @@ const COLUMN_GROUPS = [
                 id: "previews_adjustable",
                 label: "Adjustable Feature Previews",
                 columns: [
+                    previewColumn("image_combined_base64", "Preview (Combined)", "image_combined_base64", { adjustable: true }),
                     previewColumn("image_cleanup_hybrid_base64", "Preview (Cleanup)", "image_cleanup_hybrid_base64", { adjustable: true }),
                     previewColumn("image_sm_base64", "Preview (Smooth)", "image_sm_base64", { adjustable: true }),
                     previewColumn("image_traditional_base64", "Preview (Traditional) (TA)", "image_traditional_base64", { adjustable: true })
@@ -1473,7 +1475,7 @@ const GROUP_HELP_TEXT = {
     traditional_fit: "Common-shape fit features (TA) compare the cleaned fruit boundary to simple geometric or named fruit-shape templates.",
     previews: "Preview columns return diagnostic images. They are excluded from histograms and CSV downloads.",
     previews_standard: "Standard previews show OCR, calibration, and raw model outputs requested for each image.",
-    previews_adjustable: "Adjustable feature previews are highlighted in pale purple. Open Cleanup, Smooth, or Traditional (TA) previews to repaint masks, constrain and refit smoothing curves, or visually adjust traditional measurement controls.",
+    previews_adjustable: "Adjustable feature previews are highlighted in pale purple. Open Combined, Cleanup, Smooth, or Traditional (TA) previews to repaint masks, constrain and refit smoothing curves, or visually adjust traditional measurement controls.",
     run_info: "Run information columns describe OCR metadata, QR code data, and processing time rather than fruit morphology."
 };
 
@@ -1542,6 +1544,7 @@ const COLUMN_HELP_TEXT = {
     image_ocr_dbnet_base64: "Diagnostic OCR preview showing DBNet text boxes, candidate reads, confidences, and selected Line when OCR is requested. It helps diagnose Line detection errors.",
     image_pre_calibration_base64: "Image before color calibration, with ColorChecker overlay when available. Use it to verify the detected board is the middle 24-patch Passport page shown in Analysis Settings.",
     image_raw_base64: "Raw model-output preview retained for diagnosis. It shows the original predicted masks before cleanup is used for measurement.",
+    image_combined_base64: "Purple combined preview showing the main diagnostic overlays in one place: selected OCR read, QR code, ArUco scale marker, cleaned masks, flesh midline, smoothed contours, and smoothed endpoint geometry. It intentionally excludes Traditional (TA) feature overlays.",
     image_cleanup_hybrid_base64: "Cleanup preview showing processed masks, raw mask outlines, axes, midline, and ColorChecker overlay. Open it and choose Adjust Features to repaint the masks, recalculate the row, and save a correction for model fine-tuning.",
     image_sm_base64: "Smoothed preview showing fitted fruit and flesh curves plus endpoint angle geometry. Open it and choose Adjust Features to repaint masks or drag weighted rind/flesh curve anchors; saving refits all smoothing parameters together.",
     image_traditional_base64: "Traditional (TA) preview showing Tomato Analyzer-style overlays such as axes, widths, angles, circle, ellipse, and indentation areas. Open it and choose Adjust Features to repaint masks or drag the proximal width, distal width, angle-span, and indentation-band controls.",
@@ -1588,9 +1591,9 @@ const RAW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_raw"));
 const SMOOTH_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_smoothed"));
 const TRADITIONAL_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("traditional"));
 const COLOR_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_color"));
-const PREVIEW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("previews_standard"));
-const OCR_STAGE_COLUMN_IDS = new Set([...OCR_COLUMN_IDS, "image_ocr_dbnet_base64", "image_line_ocr_base64"]);
-const QR_STAGE_COLUMN_IDS = new Set(QR_COLUMN_IDS);
+const PREVIEW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("previews"));
+const OCR_STAGE_COLUMN_IDS = new Set([...OCR_COLUMN_IDS, "image_ocr_dbnet_base64", "image_line_ocr_base64", "image_combined_base64"]);
+const QR_STAGE_COLUMN_IDS = new Set([...QR_COLUMN_IDS, "image_combined_base64"]);
 
 function columnIdsForGroup(groupId) {
     const group = COLUMN_GROUP_MAP.get(groupId);
@@ -4524,6 +4527,7 @@ const MASK_ADJUSTMENT_COLUMNS = [
     ...RAW_STAGE_COLUMN_IDS,
     ...SMOOTH_STAGE_COLUMN_IDS,
     ...TRADITIONAL_STAGE_COLUMN_IDS,
+    "image_combined_base64",
     "image_cleanup_hybrid_base64",
     "image_sm_base64",
     "image_traditional_base64"
@@ -4534,6 +4538,7 @@ const TRADITIONAL_ADJUSTMENT_COLUMNS = [
 ];
 const SMOOTHING_ADJUSTMENT_COLUMNS = [
     ...SMOOTH_STAGE_COLUMN_IDS,
+    "image_combined_base64",
     "image_sm_base64"
 ];
 
