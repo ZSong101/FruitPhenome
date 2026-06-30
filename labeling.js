@@ -73,6 +73,7 @@
     let latentDragStart = null;
     let latentHovered = null;
     let latentMethod = "";
+    let latentColorMap = {};
 
     // --- DOM ---
     const el = (id) => document.getElementById(id);
@@ -116,6 +117,8 @@
             syncPushBtn: el("studio-sync-push-btn"),
             syncPullBtn: el("studio-sync-pull-btn"),
             syncExportBtn: el("studio-sync-export-btn"),
+            syncDeleteLocalBtn: el("studio-sync-delete-local-btn"),
+            syncDeleteRemoteBtn: el("studio-sync-delete-remote-btn"),
             syncImportInput: el("studio-sync-import-input"),
             syncReplace: el("studio-sync-replace"),
             syncStatus: el("studio-sync-status"),
@@ -264,14 +267,31 @@
             const id = item.dataset_id || item.id || "";
             const title = item.name || item.id || item.dataset_id || "Unnamed";
             const fruit = String(item.fruit_type || "").replace(/_/g, " ") || "unknown fruit";
+            const lastUsed = Number(item.last_used_hours);
+            const lastUsedText = Number.isFinite(lastUsed) ? ` · ${lastUsed.toFixed(1)} h since last use` : "";
+            const expiryText = kind === "datasets" && source === "remote" && item.stale_delete_warning
+                ? ` · deletes in ${Number(item.hours_until_expiry || 0).toFixed(1)} h`
+                : "";
             const meta = kind === "datasets"
-                ? `${fruit} · ${item.owner_username || "global"} · ${item.image_count || 0} images`
+                ? `${fruit} · ${item.owner_username || "global"} · ${item.image_count || 0} images${lastUsedText}${expiryText}`
                 : `${fruit} · v${item.version || "?"} · ${item.status || "unknown"}`;
-            return `<label class="studio-sync-item">
+            return `<label class="studio-sync-item ${item.stale_delete_warning && source === "remote" ? "stale-warning" : ""}">
                 <input type="checkbox" data-sync-source="${source}" data-sync-kind="${kind}" value="${esc(id)}">
                 <span>${esc(title)}<small>${esc(id)} · ${esc(meta)}</small></span>
             </label>`;
         }).join("");
+    }
+
+    function renderSyncLoading() {
+        const d = dom();
+        [
+            [d.syncLocalDatasets, "Loading local dev datasets..."],
+            [d.syncLocalExperts, "Loading local dev models..."],
+            [d.syncRemoteDatasets, "Loading production datasets..."],
+            [d.syncRemoteExperts, "Loading production models..."],
+        ].forEach(([container, message]) => {
+            if (container) container.innerHTML = `<span class="studio-sync-loading">${esc(message)}</span>`;
+        });
     }
 
     function setLatentStatus(message, isError = false) {
@@ -281,11 +301,51 @@
         d.latentStatus.style.color = isError ? "#c7362f" : "";
     }
 
+    function loadLatentColorMap() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem("fruitphenome_latent_colors_v1") || "{}");
+            latentColorMap = parsed && typeof parsed === "object" ? parsed : {};
+        } catch (_err) {
+            latentColorMap = {};
+        }
+    }
+
+    function saveLatentColorMap() {
+        try {
+            localStorage.setItem("fruitphenome_latent_colors_v1", JSON.stringify(latentColorMap));
+        } catch (_err) {}
+    }
+
+    function circularHueDistance(a, b) {
+        const diff = Math.abs(Number(a) - Number(b)) % 360;
+        return Math.min(diff, 360 - diff);
+    }
+
+    function nextMaxDistanceHue() {
+        const used = Object.values(latentColorMap)
+            .map(entry => Number(entry?.hue))
+            .filter(Number.isFinite);
+        if (!used.length) return 270;
+        let bestHue = 0;
+        let bestDistance = -1;
+        for (let hue = 0; hue < 360; hue += 1) {
+            const minDistance = Math.min(...used.map(existing => circularHueDistance(hue, existing)));
+            if (minDistance > bestDistance) {
+                bestDistance = minDistance;
+                bestHue = hue;
+            }
+        }
+        return bestHue;
+    }
+
     function latentColor(key) {
-        let hash = 0;
-        const text = String(key || "unknown");
-        for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
-        return `hsl(${hash % 360} 68% 48%)`;
+        const text = String(key || "unknown fruit");
+        if (!latentColorMap[text]) {
+            const hue = nextMaxDistanceHue();
+            latentColorMap[text] = { hue, color: `hsl(${hue} 68% 48%)` };
+            saveLatentColorMap();
+        }
+        return latentColorMap[text].color;
     }
 
     function computeLatentBounds(points) {
@@ -476,6 +536,7 @@
         if (d.syncPanel) d.syncPanel.classList.add("visible");
         try {
             if (d.syncRefreshBtn) d.syncRefreshBtn.disabled = true;
+            renderSyncLoading();
             setSyncStatus("Loading sync inventory...");
             const [localResult, remoteResult] = await Promise.allSettled([
                 syncGetJson("/inventory"),
@@ -528,6 +589,49 @@
         if ((payload.dataset_ids || []).length || (payload.expert_ids || []).length) return true;
         setSyncStatus(`Select at least one dataset or model to ${directionLabel}.`, true);
         return false;
+    }
+
+    function resetSyncDeleteConfirmation(button, label) {
+        if (!button) return;
+        button.dataset.confirmingDelete = "false";
+        button.classList.remove("confirming-delete");
+        button.textContent = label;
+    }
+
+    function confirmSyncDelete(button, label, count) {
+        if (!button) return false;
+        if (button.dataset.confirmingDelete === "true") return true;
+        button.dataset.confirmingDelete = "true";
+        button.classList.add("confirming-delete");
+        button.textContent = `Click again to delete ${count}`;
+        setTimeout(() => resetSyncDeleteConfirmation(button, label), 4000);
+        return false;
+    }
+
+    async function deleteSelectedSyncItems(source) {
+        const d = dom();
+        const isRemote = source === "remote";
+        const button = isRemote ? d.syncDeleteRemoteBtn : d.syncDeleteLocalBtn;
+        const label = isRemote ? "Delete selected production items" : "Delete selected dev items";
+        const payload = syncPayloadFor(source);
+        const count = (payload.dataset_ids || []).length + (payload.expert_ids || []).length;
+        if (!ensureSyncSelection(payload, `delete from ${isRemote ? "production" : "dev"}`)) return;
+        if (!confirmSyncDelete(button, label, count)) return;
+        try {
+            if (button) button.disabled = true;
+            setSyncStatus(`Permanently deleting ${count} selected ${isRemote ? "production" : "dev"} item${count === 1 ? "" : "s"}...`);
+            const result = await syncPostJson(isRemote ? "/delete_prod" : "/delete", payload);
+            if (result.success === false) throw new Error(result.message || "Delete failed.");
+            resetSyncDeleteConfirmation(button, label);
+            setSyncStatus("Delete complete. Refreshing inventories...");
+            await refreshSyncInventory();
+        } catch (err) {
+            setSyncStatus(`Delete failed: ${err.message}`, true);
+        } finally {
+            if (button) button.disabled = false;
+            resetSyncDeleteConfirmation(button, label);
+            updateButtons();
+        }
     }
 
     async function pushSelectedToProduction() {
@@ -629,7 +733,12 @@
             const options = [`<option value="">Select dataset...</option>`];
             datasetSummaries.forEach((ds) => {
                 const fruit = String(ds.fruit_type || "watermelon").replace(/_/g, " ");
-                options.push(`<option value="${esc(ds.dataset_id)}">${esc(ds.name)} · ${esc(fruit)} (${ds.image_count} img)</option>`);
+                const lastUsed = Number(ds.last_used_hours);
+                const lastUsedText = Number.isFinite(lastUsed) ? ` · ${lastUsed.toFixed(1)} h since last use` : "";
+                const expiryText = ds.stale_delete_warning
+                    ? ` · deletes in ${Number(ds.hours_until_expiry || 0).toFixed(1)} h`
+                    : "";
+                options.push(`<option value="${esc(ds.dataset_id)}">${esc(ds.name)} · ${esc(fruit)} (${ds.image_count} img)${esc(lastUsedText)}${esc(expiryText)}</option>`);
             });
             options.push(`<option value="__new__">+ Create new dataset...</option>`);
             d.datasetSelect.innerHTML = options.join("");
@@ -1664,6 +1773,8 @@
         if (d.syncPushBtn) d.syncPushBtn.disabled = !syncAllowed();
         if (d.syncPullBtn) d.syncPullBtn.disabled = !syncAllowed();
         if (d.syncExportBtn) d.syncExportBtn.disabled = !syncAllowed();
+        if (d.syncDeleteLocalBtn) d.syncDeleteLocalBtn.disabled = !syncAllowed();
+        if (d.syncDeleteRemoteBtn) d.syncDeleteRemoteBtn.disabled = !syncAllowed();
         if (d.syncImportInput) d.syncImportInput.disabled = !syncAllowed();
         if (d.latentRefreshBtn) d.latentRefreshBtn.disabled = !syncAllowed();
         if (d.latentResetBtn) d.latentResetBtn.disabled = !syncAllowed() || !latentPoints.length;
@@ -1762,6 +1873,8 @@
         d.syncPushBtn?.addEventListener("click", pushSelectedToProduction);
         d.syncPullBtn?.addEventListener("click", pullSelectedFromProduction);
         d.syncExportBtn?.addEventListener("click", exportSelectedDevBundle);
+        d.syncDeleteLocalBtn?.addEventListener("click", () => deleteSelectedSyncItems("local"));
+        d.syncDeleteRemoteBtn?.addEventListener("click", () => deleteSelectedSyncItems("remote"));
         d.syncImportInput?.addEventListener("change", (e) => importBundleToDev(e.target.files?.[0]));
         d.latentRefreshBtn?.addEventListener("click", loadLatentMap);
         d.latentResetBtn?.addEventListener("click", resetLatentView);
@@ -1936,6 +2049,7 @@
     }
 
     function init() {
+        loadLatentColorMap();
         bindEvents();
         // Expose the OOD handoff hook for app.js.
         window.LabelingStudio = {
