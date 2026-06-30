@@ -64,6 +64,15 @@
     let activeTrainJobStartedAt = null;
     let activeTrainJobLatest = null;
     let activeTrainJobTimer = null;
+    let latentPoints = [];
+    let latentBounds = null;
+    let latentZoom = 1;
+    let latentPanX = 0;
+    let latentPanY = 0;
+    let latentDragging = false;
+    let latentDragStart = null;
+    let latentHovered = null;
+    let latentMethod = "";
 
     // --- DOM ---
     const el = (id) => document.getElementById(id);
@@ -114,6 +123,14 @@
             syncLocalExperts: el("studio-sync-local-experts"),
             syncRemoteDatasets: el("studio-sync-remote-datasets"),
             syncRemoteExperts: el("studio-sync-remote-experts"),
+            latentPanel: el("studio-latent-panel"),
+            latentRefreshBtn: el("studio-latent-refresh-btn"),
+            latentResetBtn: el("studio-latent-reset-btn"),
+            latentStatus: el("studio-latent-status"),
+            latentWrap: el("studio-latent-wrap"),
+            latentCanvas: el("studio-latent-canvas"),
+            latentTooltip: el("studio-latent-tooltip"),
+            latentLegend: el("studio-latent-legend"),
             status: el("studio-status"),
             queueList: el("studio-queue-list"),
             prelabelBtn: el("studio-prelabel-btn"),
@@ -257,27 +274,229 @@
         }).join("");
     }
 
+    function setLatentStatus(message, isError = false) {
+        const d = dom();
+        if (!d.latentStatus) return;
+        d.latentStatus.innerText = message || "";
+        d.latentStatus.style.color = isError ? "#c7362f" : "";
+    }
+
+    function latentColor(key) {
+        let hash = 0;
+        const text = String(key || "unknown");
+        for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+        return `hsl(${hash % 360} 68% 48%)`;
+    }
+
+    function computeLatentBounds(points) {
+        if (!points.length) return null;
+        const xs = points.map(p => Number(p.x)).filter(Number.isFinite);
+        const ys = points.map(p => Number(p.y)).filter(Number.isFinite);
+        if (!xs.length || !ys.length) return null;
+        let minX = Math.min(...xs), maxX = Math.max(...xs);
+        let minY = Math.min(...ys), maxY = Math.max(...ys);
+        if (minX === maxX) { minX -= 1; maxX += 1; }
+        if (minY === maxY) { minY -= 1; maxY += 1; }
+        return { minX, maxX, minY, maxY };
+    }
+
+    function sizeLatentCanvas() {
+        const d = dom();
+        const canvas = d.latentCanvas;
+        const wrap = d.latentWrap;
+        if (!canvas || !wrap) return { width: 0, height: 0, dpr: 1 };
+        const rect = wrap.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const width = Math.max(320, Math.floor(rect.width || 720));
+        const height = Math.max(260, Math.floor(rect.height || 420));
+        if (canvas.width !== Math.floor(width * dpr) || canvas.height !== Math.floor(height * dpr)) {
+            canvas.width = Math.floor(width * dpr);
+            canvas.height = Math.floor(height * dpr);
+        }
+        return { width, height, dpr };
+    }
+
+    function latentWorldToScreen(point, metrics) {
+        const bounds = latentBounds;
+        if (!bounds) return { x: 0, y: 0 };
+        const spanX = bounds.maxX - bounds.minX;
+        const spanY = bounds.maxY - bounds.minY;
+        const baseScale = 0.86 * Math.min(metrics.width / spanX, metrics.height / spanY);
+        const midX = (bounds.minX + bounds.maxX) / 2;
+        const midY = (bounds.minY + bounds.maxY) / 2;
+        return {
+            x: metrics.width / 2 + (Number(point.x) - midX) * baseScale * latentZoom + latentPanX,
+            y: metrics.height / 2 - (Number(point.y) - midY) * baseScale * latentZoom + latentPanY,
+        };
+    }
+
+    function updateLatentLegend() {
+        const d = dom();
+        if (!d.latentLegend) return;
+        const fruits = [...new Set(latentPoints.map(p => String(p.fruit_type || "unknown fruit")))].sort();
+        d.latentLegend.innerHTML = fruits.map(fruit => (
+            `<span><span class="studio-latent-dot" style="background:${latentColor(fruit)}"></span>${esc(fruit.replace(/_/g, " "))}</span>`
+        )).join("");
+    }
+
+    function drawLatentMap() {
+        const d = dom();
+        const canvas = d.latentCanvas;
+        if (!canvas) return;
+        const metrics = sizeLatentCanvas();
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+        ctx.clearRect(0, 0, metrics.width, metrics.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, metrics.width, metrics.height);
+
+        ctx.strokeStyle = "#edf0f4";
+        ctx.lineWidth = 1;
+        for (let x = 40; x < metrics.width; x += 80) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, metrics.height); ctx.stroke();
+        }
+        for (let y = 40; y < metrics.height; y += 80) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(metrics.width, y); ctx.stroke();
+        }
+
+        if (!latentPoints.length || !latentBounds) {
+            ctx.fillStyle = "#6b7480";
+            ctx.font = "14px system-ui, sans-serif";
+            ctx.fillText("Load PaCMAP map to view stored latent embeddings.", 18, 30);
+            return;
+        }
+
+        latentPoints.forEach(point => {
+            const pos = latentWorldToScreen(point, metrics);
+            point._sx = pos.x;
+            point._sy = pos.y;
+            const active = point === latentHovered;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, active ? 5.5 : 3.8, 0, Math.PI * 2);
+            ctx.fillStyle = latentColor(point.fruit_type);
+            ctx.globalAlpha = active ? 1 : 0.78;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            if (active) {
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = "#231834";
+                ctx.stroke();
+            }
+        });
+
+        ctx.fillStyle = "#4d2779";
+        ctx.font = "12px system-ui, sans-serif";
+        ctx.fillText(`${latentMethod || "PaCMAP"} · ${latentPoints.length} stored embeddings`, 12, metrics.height - 12);
+    }
+
+    function nearestLatentPoint(event) {
+        const d = dom();
+        const canvas = d.latentCanvas;
+        if (!canvas || !latentPoints.length) return null;
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        let best = null;
+        let bestDist = Infinity;
+        latentPoints.forEach(point => {
+            const dx = x - Number(point._sx);
+            const dy = y - Number(point._sy);
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < bestDist) {
+                best = point;
+                bestDist = dist;
+            }
+        });
+        return bestDist <= 12 ? best : null;
+    }
+
+    function updateLatentTooltip(point, event) {
+        const d = dom();
+        const tooltip = d.latentTooltip;
+        const wrap = d.latentWrap;
+        if (!tooltip || !wrap) return;
+        if (!point || !event) {
+            tooltip.classList.remove("visible");
+            return;
+        }
+        tooltip.innerHTML = `<strong>${esc(point.image_name || "latent point")}</strong><br>
+            ${esc(point.expert_id || "unknown model")} · v${esc(point.version || "?")} · ${esc(point.status || "")}<br>
+            ${esc(String(point.fruit_type || "unknown fruit").replace(/_/g, " "))}`;
+        const rect = wrap.getBoundingClientRect();
+        tooltip.style.left = `${Math.min(Math.max(event.clientX - rect.left + 12, 8), rect.width - 220)}px`;
+        tooltip.style.top = `${Math.min(Math.max(event.clientY - rect.top + 12, 8), rect.height - 80)}px`;
+        tooltip.classList.add("visible");
+    }
+
+    function resetLatentView() {
+        latentZoom = 1;
+        latentPanX = 0;
+        latentPanY = 0;
+        drawLatentMap();
+    }
+
+    async function loadLatentMap() {
+        if (!syncAllowed()) return;
+        const d = dom();
+        if (d.latentRefreshBtn) d.latentRefreshBtn.disabled = true;
+        setLatentStatus("Computing PaCMAP projection...");
+        try {
+            const data = await syncGetJson("/latent_space?max_points=3000");
+            if (!data.success) throw new Error(data.message || "PaCMAP projection failed.");
+            latentPoints = Array.isArray(data.points) ? data.points : [];
+            latentBounds = computeLatentBounds(latentPoints);
+            latentMethod = data.method || "PaCMAP";
+            latentHovered = null;
+            resetLatentView();
+            updateLatentLegend();
+            setLatentStatus(latentPoints.length ? `${latentMethod} loaded (${latentPoints.length} points).` : "No latent embeddings found.");
+            updateButtons();
+        } catch (err) {
+            latentPoints = [];
+            latentBounds = null;
+            latentHovered = null;
+            drawLatentMap();
+            updateLatentLegend();
+            setLatentStatus(err.message || "Could not load PaCMAP map.", true);
+            updateButtons();
+        } finally {
+            if (d.latentRefreshBtn) d.latentRefreshBtn.disabled = false;
+            updateButtons();
+        }
+    }
+
     async function refreshSyncInventory() {
         const d = dom();
         if (!syncAllowed()) {
             if (d.syncPanel) d.syncPanel.classList.remove("visible");
+            if (d.latentPanel) d.latentPanel.classList.remove("visible");
             return;
         }
         if (d.syncPanel) d.syncPanel.classList.add("visible");
         try {
             if (d.syncRefreshBtn) d.syncRefreshBtn.disabled = true;
             setSyncStatus("Loading sync inventory...");
-            const [local, remote] = await Promise.all([
+            const [localResult, remoteResult] = await Promise.allSettled([
                 syncGetJson("/inventory"),
                 syncGetJson("/remote_inventory"),
             ]);
+            if (localResult.status === "rejected") throw localResult.reason;
+            const local = localResult.value;
             if (local.success === false) throw new Error(local.message || "Could not load local inventory.");
             renderSyncList(d.syncLocalDatasets, local.datasets, "local", "datasets");
             renderSyncList(d.syncLocalExperts, local.experts, "local", "experts");
+            if (remoteResult.status === "rejected") {
+                renderSyncList(d.syncRemoteDatasets, [], "remote", "datasets");
+                renderSyncList(d.syncRemoteExperts, [], "remote", "experts");
+                setSyncStatus(`Local dev inventory loaded. Production inventory unavailable: ${remoteResult.reason?.message || remoteResult.reason}`);
+                return;
+            }
+            const remote = remoteResult.value;
             if (remote.success === false) {
                 renderSyncList(d.syncRemoteDatasets, [], "remote", "datasets");
                 renderSyncList(d.syncRemoteExperts, [], "remote", "experts");
-                setSyncStatus(remote.message || "Production inventory unavailable.", true);
+                setSyncStatus(`Local dev inventory loaded. Production inventory unavailable: ${remote.message || "production backend may not expose /sync/inventory yet."}`);
                 return;
             }
             renderSyncList(d.syncRemoteDatasets, remote.datasets, "remote", "datasets");
@@ -395,6 +614,11 @@
 
     async function loadDatasets(selectId) {
         const d = dom();
+        if (d.datasetSelect) {
+            d.datasetSelect.innerHTML = `<option value="">Loading saved datasets...</option>`;
+            d.datasetSelect.disabled = true;
+        }
+        setStatus("Loading saved labeling datasets and model metadata...");
         try {
             const data = await apiGetJson("");
             if (!data.success) throw new Error(data.message || "Could not load datasets.");
@@ -419,10 +643,16 @@
                 images = [];
                 renderQueue();
                 renderModelPlan(null);
+                if (d.datasetSelect) d.datasetSelect.value = "";
             }
             setStatus("");
         } catch (err) {
+            if (d.datasetSelect) {
+                d.datasetSelect.innerHTML = `<option value="">Could not load saved datasets</option>`;
+            }
             setStatus(`Could not load datasets: ${err.message}`, true);
+        } finally {
+            if (d.datasetSelect) d.datasetSelect.disabled = false;
         }
     }
 
@@ -1429,11 +1659,14 @@
         if (d.finetuneBtn) d.finetuneBtn.disabled = !currentDatasetId;
         if (d.augmentPreviewBtn) d.augmentPreviewBtn.disabled = !currentDatasetId;
         if (d.syncPanel) d.syncPanel.classList.toggle("visible", syncAllowed());
+        if (d.latentPanel) d.latentPanel.classList.toggle("visible", syncAllowed());
         if (d.syncRefreshBtn) d.syncRefreshBtn.disabled = !syncAllowed();
         if (d.syncPushBtn) d.syncPushBtn.disabled = !syncAllowed();
         if (d.syncPullBtn) d.syncPullBtn.disabled = !syncAllowed();
         if (d.syncExportBtn) d.syncExportBtn.disabled = !syncAllowed();
         if (d.syncImportInput) d.syncImportInput.disabled = !syncAllowed();
+        if (d.latentRefreshBtn) d.latentRefreshBtn.disabled = !syncAllowed();
+        if (d.latentResetBtn) d.latentResetBtn.disabled = !syncAllowed() || !latentPoints.length;
         if (d.zoomInBtn) d.zoomInBtn.disabled = !hasImage || zoomLevel >= 8;
         if (d.zoomOutBtn) d.zoomOutBtn.disabled = !hasImage || zoomLevel <= 1;
         if (d.zoomResetBtn) d.zoomResetBtn.disabled = !hasImage || (zoomLevel === 1 && panX === 0 && panY === 0);
@@ -1530,6 +1763,56 @@
         d.syncPullBtn?.addEventListener("click", pullSelectedFromProduction);
         d.syncExportBtn?.addEventListener("click", exportSelectedDevBundle);
         d.syncImportInput?.addEventListener("change", (e) => importBundleToDev(e.target.files?.[0]));
+        d.latentRefreshBtn?.addEventListener("click", loadLatentMap);
+        d.latentResetBtn?.addEventListener("click", resetLatentView);
+        d.latentCanvas?.addEventListener("pointerdown", (e) => {
+            if (!syncAllowed()) return;
+            latentDragging = true;
+            latentDragStart = { x: e.clientX, y: e.clientY, panX: latentPanX, panY: latentPanY };
+            d.latentCanvas.setPointerCapture?.(e.pointerId);
+            d.latentCanvas.classList.add("dragging");
+        });
+        d.latentCanvas?.addEventListener("pointermove", (e) => {
+            if (latentDragging && latentDragStart) {
+                latentPanX = latentDragStart.panX + (e.clientX - latentDragStart.x);
+                latentPanY = latentDragStart.panY + (e.clientY - latentDragStart.y);
+                drawLatentMap();
+                updateLatentTooltip(null, null);
+                return;
+            }
+            latentHovered = nearestLatentPoint(e);
+            drawLatentMap();
+            updateLatentTooltip(latentHovered, e);
+        });
+        d.latentCanvas?.addEventListener("pointerup", (e) => {
+            latentDragging = false;
+            latentDragStart = null;
+            d.latentCanvas.releasePointerCapture?.(e.pointerId);
+            d.latentCanvas.classList.remove("dragging");
+        });
+        d.latentCanvas?.addEventListener("pointerleave", () => {
+            latentDragging = false;
+            latentDragStart = null;
+            latentHovered = null;
+            d.latentCanvas.classList.remove("dragging");
+            updateLatentTooltip(null, null);
+            drawLatentMap();
+        });
+        d.latentCanvas?.addEventListener("wheel", (e) => {
+            if (!latentPoints.length) return;
+            e.preventDefault();
+            const rect = d.latentCanvas.getBoundingClientRect();
+            const beforeX = e.clientX - rect.left;
+            const beforeY = e.clientY - rect.top;
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            const prevZoom = latentZoom;
+            latentZoom = Math.min(18, Math.max(0.35, latentZoom * factor));
+            const scaleRatio = latentZoom / prevZoom;
+            latentPanX = beforeX - (beforeX - latentPanX) * scaleRatio;
+            latentPanY = beforeY - (beforeY - latentPanY) * scaleRatio;
+            drawLatentMap();
+        }, { passive: false });
+        window.addEventListener("resize", drawLatentMap);
         d.datasetSelect?.addEventListener("change", async (e) => {
             if (e.target.value === "__new__") {
                 const previous = currentDatasetId || "";

@@ -84,6 +84,13 @@
     .saved-job-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; color: #425563; font-size: 13px; }
     .saved-job-row label { font-weight: 700; }
     .saved-job-row select { min-width: min(100%, 360px); max-width: 100%; }
+    .stored-data-status { display: none; align-items: center; gap: 9px; margin: -8px 0 18px; padding: 9px 12px; border: 1px solid #cfe0ef; border-radius: 7px; background: #f4f9fd; color: #29495f; font-size: 13px; font-weight: 700; }
+    .stored-data-status.visible { display: flex; }
+    .stored-data-status.ready { border-color: #cddfce; background: #f3faf4; color: #295a33; }
+    .stored-data-status.warning { border-color: #eed9a8; background: #fff8e6; color: #6b4d00; }
+    .stored-data-spinner { width: 13px; height: 13px; border: 2px solid rgba(41, 73, 95, 0.24); border-top-color: #4b84b4; border-radius: 50%; animation: stored-data-spin 0.8s linear infinite; flex: 0 0 auto; }
+    .stored-data-status.ready .stored-data-spinner, .stored-data-status.warning .stored-data-spinner { display: none; }
+    @keyframes stored-data-spin { to { transform: rotate(360deg); } }
     .toolbar-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-left: auto; }
     .column-dropdown { position: relative; display: inline-flex; align-items: center; }
     .bulk-toolbar button, .single-toolbar button, .settings-column-toolbar button, .analysis-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
@@ -257,6 +264,21 @@
     .studio-sync-actions button.primary { background: #0b3d91; border-color: #0b3d91; color: #fff; }
     .studio-sync-actions button.warning { background: #6e3b8f; border-color: #6e3b8f; color: #fff; }
     .studio-sync-actions input[type="file"] { max-width: 220px; }
+    .studio-latent-panel { display: none; margin: 14px 0; padding: 12px; border: 1px solid #d8c8ef; border-radius: 8px; background: #fbf8ff; }
+    .studio-latent-panel.visible { display: block; }
+    .studio-latent-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+    .studio-latent-head h4 { margin: 0; color: #4d2779; }
+    .studio-latent-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .studio-latent-actions button { min-height: 34px; padding: 7px 11px; border: 1px solid #bfa7dc; border-radius: 6px; background: #f0e8fb; color: #4d2779; font-weight: 800; cursor: pointer; }
+    .studio-latent-actions button:hover:not(:disabled) { background: #e6daf6; }
+    .studio-latent-canvas-wrap { position: relative; width: 100%; height: 420px; min-height: 280px; border: 1px solid #d4c4ea; border-radius: 8px; background: #fff; overflow: hidden; touch-action: none; }
+    #studio-latent-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+    #studio-latent-canvas.dragging { cursor: grabbing; }
+    .studio-latent-tooltip { display: none; position: absolute; z-index: 8; max-width: min(320px, calc(100% - 24px)); padding: 8px 10px; border-radius: 7px; background: rgba(35, 24, 52, 0.92); color: #fff; font-size: 12px; line-height: 1.35; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,0.22); }
+    .studio-latent-tooltip.visible { display: block; }
+    .studio-latent-legend { display: flex; gap: 8px 14px; flex-wrap: wrap; margin-top: 8px; color: #4d5963; font-size: 12px; }
+    .studio-latent-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+    .studio-latent-note { margin: 6px 0 0; color: #697985; font-size: 12px; }
     .studio-augment-options { margin: -6px 0 18px; padding: 12px 14px; border: 1px solid #d8e1e8; border-radius: 8px; background: #fbfcfd; }
     .studio-augment-options summary { cursor: pointer; font-weight: 800; color: #1f3545; }
     .studio-augment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 14px; margin-top: 10px; align-items: end; }
@@ -358,6 +380,10 @@
     <!-- SERVER QUEUE DASHBOARD -->
     <div id="server-status" style="background: #e9ecef; padding: 10px; border-radius: 5px; margin-bottom: 20px; text-align: center; font-weight: bold; color: #555; transition: all 0.3s;">
       Connecting to server...
+    </div>
+    <div id="stored-data-status" class="stored-data-status" role="status" aria-live="polite">
+      <span class="stored-data-spinner" aria-hidden="true"></span>
+      <span id="stored-data-status-text">Loading saved data...</span>
     </div>
 
     <nav class="app-tabs" role="tablist" aria-label="Phenotyping workflow">
@@ -740,6 +766,24 @@
             <div id="studio-sync-remote-experts" class="studio-sync-list"></div>
           </section>
         </div>
+        <section id="studio-latent-panel" class="studio-latent-panel">
+          <div class="studio-latent-head">
+            <div>
+              <h4>PaCMAP Latent Space</h4>
+              <p class="studio-latent-note">Stored expert reference embeddings only. Scroll to zoom, drag to pan, hover points for image/model details.</p>
+            </div>
+            <div class="studio-latent-actions">
+              <button id="studio-latent-refresh-btn" type="button">Load PaCMAP map</button>
+              <button id="studio-latent-reset-btn" type="button">Reset view</button>
+              <span id="studio-latent-status" class="muted" role="status"></span>
+            </div>
+          </div>
+          <div id="studio-latent-wrap" class="studio-latent-canvas-wrap">
+            <canvas id="studio-latent-canvas"></canvas>
+            <div id="studio-latent-tooltip" class="studio-latent-tooltip"></div>
+          </div>
+          <div id="studio-latent-legend" class="studio-latent-legend"></div>
+        </section>
         <div class="studio-sync-actions">
           <button id="studio-sync-push-btn" class="primary" type="button">Push selected dev items to production</button>
           <button id="studio-sync-pull-btn" class="warning" type="button">Pull selected production items to dev</button>

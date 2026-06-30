@@ -16,6 +16,7 @@ let currentPassword = ""; // Stores the password in memory after a successful lo
 let currentUsername = ""; // Stores user identity
 let currentSessionId = "";
 let queuePollingIntervalId = null;
+let storedDataStatusHideTimer = null;
 
 function makeClientId(prefix = "id") {
     if (window.crypto?.randomUUID) return `${prefix}_${window.crypto.randomUUID()}`;
@@ -56,6 +57,27 @@ function flushQueueUrl() {
 
 function isDevUser() {
     return currentUsername.trim().toLowerCase() === "devtest";
+}
+
+function setStoredDataStatus(message, state = "loading", autoHideMs = 0) {
+    const banner = document.getElementById("stored-data-status");
+    const text = document.getElementById("stored-data-status-text");
+    if (!banner || !text) return;
+    if (storedDataStatusHideTimer) {
+        clearTimeout(storedDataStatusHideTimer);
+        storedDataStatusHideTimer = null;
+    }
+    text.innerText = message || "";
+    banner.classList.toggle("visible", Boolean(message));
+    banner.classList.toggle("ready", state === "ready");
+    banner.classList.toggle("warning", state === "warning");
+    if (autoHideMs > 0) {
+        storedDataStatusHideTimer = setTimeout(() => {
+            banner.classList.remove("visible", "ready", "warning");
+            text.innerText = "";
+            storedDataStatusHideTimer = null;
+        }, autoHideMs);
+    }
 }
 
 function safeClientToken(value) {
@@ -452,8 +474,15 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
         }
         
         startQueuePolling(); // Boot up the live dashboard
-        await loadExperts(); // Populate the fruit dropdown from the trained-expert registry
-        await restoreLatestPersistentJob();
+        setStoredDataStatus("Loading saved data: fruit models, model versions, and processing batches...");
+        const expertsLoaded = await loadExperts(); // Populate the fruit dropdown from the trained-expert registry
+        setStoredDataStatus("Loading saved processing batches...");
+        const jobsLoaded = await restoreLatestPersistentJob();
+        if (expertsLoaded && jobsLoaded) {
+            setStoredDataStatus("Saved models, model versions, and processing batches loaded.", "ready", 3500);
+        } else {
+            setStoredDataStatus("Some saved data could not be loaded. Refresh or try again if something looks missing.", "warning", 6000);
+        }
     } else {
         errorDiv.innerText = "Incorrect password.";
     }
@@ -631,15 +660,32 @@ function rebuildModelVersionOptions(fruitType = selectedFruit()) {
 window.refreshExperts = function () { return loadExperts(); };
 
 async function loadExperts() {
+    const fruitSelect = document.getElementById("fruit-select");
+    const modelSelect = document.getElementById("model-version-select");
+    const modelRow = document.getElementById("model-version-row");
+    if (fruitSelect && !fruitSelect.value) {
+        fruitSelect.innerHTML = '<option value="" selected disabled>Loading saved fruit models...</option>';
+    }
+    if (modelSelect && modelRow && modelRow.style.display !== "none") {
+        modelSelect.innerHTML = '<option value="">Loading model versions...</option>';
+    }
     try {
         const url = `${expertsUrl()}?username=${encodeURIComponent(currentUsername || "")}&password=${encodeURIComponent(currentPassword || "")}`;
         const response = await fetch(url);
         const data = await response.json();
         if (data && data.success && Array.isArray(data.experts)) {
             rebuildFruitOptions(data.experts);
+            return true;
+        } else if (fruitSelect && !fruitSelect.querySelector("option[value='watermelon']")) {
+            rebuildFruitOptions([]);
         }
+        return false;
     } catch (err) {
         console.warn("Could not load experts; keeping default fruit options.", err);
+        if (fruitSelect && !fruitSelect.querySelector("option[value='watermelon']")) {
+            rebuildFruitOptions([]);
+        }
+        return false;
     }
 }
 
@@ -2821,41 +2867,56 @@ async function createPersistentBatchJob(files, settings) {
 async function refreshSavedJobSelector(selectedJobId = "") {
     const select = document.getElementById("saved-job-select");
     if (!currentUsername || !currentPassword) return [];
+    if (select) {
+        select.innerHTML = `<option value="">Loading saved processing jobs...</option>`;
+        select.disabled = true;
+    }
     const params = new URLSearchParams({
         username: currentUsername,
         password: currentPassword,
         _t: Date.now().toString()
     });
-    const response = await fetch(`${processJobsUrl()}?${params}`, { cache: "no-store" });
-    const data = await response.json();
-    const jobs = data.success && Array.isArray(data.jobs) ? data.jobs : [];
-    if (select) {
-        select.innerHTML = jobs.length
-            ? jobs.map(job => {
-                const created = job.created_at ? new Date(job.created_at).toLocaleString() : job.job_id;
-                const label = `${created} · ${job.status} · ${job.completed || 0}/${job.row_count || 0}`;
-                return `<option value="${escapeHtml(job.job_id)}">${escapeHtml(label)}</option>`;
-            }).join("")
-            : `<option value="">No saved jobs</option>`;
-        const target = selectedJobId || activeBatch?.persistentJobId || jobs[0]?.job_id || "";
-        if (target) select.value = target;
+    try {
+        const response = await fetch(`${processJobsUrl()}?${params}`, { cache: "no-store" });
+        const data = await response.json();
+        const jobs = data.success && Array.isArray(data.jobs) ? data.jobs : [];
+        if (select) {
+            select.innerHTML = jobs.length
+                ? jobs.map(job => {
+                    const created = job.created_at ? new Date(job.created_at).toLocaleString() : job.job_id;
+                    const label = `${created} · ${job.status} · ${job.completed || 0}/${job.row_count || 0}`;
+                    return `<option value="${escapeHtml(job.job_id)}">${escapeHtml(label)}</option>`;
+                }).join("")
+                : `<option value="">No saved jobs found</option>`;
+            const target = selectedJobId || activeBatch?.persistentJobId || jobs[0]?.job_id || "";
+            if (target) select.value = target;
+        }
+        return jobs;
+    } catch (err) {
+        if (select) {
+            select.innerHTML = `<option value="">Could not load saved jobs</option>`;
+        }
+        throw err;
+    } finally {
+        if (select) select.disabled = false;
     }
-    return jobs;
 }
 
 async function restoreLatestPersistentJob() {
-    if (!currentUsername || !currentPassword) return;
+    if (!currentUsername || !currentPassword) return true;
     try {
         const jobs = await refreshSavedJobSelector();
         const latest = jobs[0];
-        if (!latest) return;
+        if (!latest) return true;
         const job = await fetchPersistentJob(latest.job_id);
         applyPersistentJob(job, { restored: true });
         if (["queued", "running", "stopping"].includes(job.status)) {
             startPersistentJobPolling(job.job_id);
         }
+        return true;
     } catch (err) {
         console.warn("Could not restore persistent processing history.", err);
+        return false;
     }
 }
 
