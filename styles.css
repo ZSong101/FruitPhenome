@@ -181,7 +181,7 @@ button:hover {
 }
 
 .single-preview-card {
-  grid-column: span 2;
+  grid-column: span 1;
 }
 
 .single-preview-img {
