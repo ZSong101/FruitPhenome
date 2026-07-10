@@ -9,6 +9,9 @@ const BULK_TIMEOUT_MESSAGE = "Taking longer than 40 seconds. Moving on.";
 const BULK_RETRY_MESSAGE = "Taking longer than 40 seconds. Trying again...";
 const BULK_SERVER_RETRY_MESSAGE = "Server unavailable or warming up. Trying again...";
 const STOP_CONFIRM_MS = 3500;
+const PROD_WARMUP_TIMEOUT_MS = 40000;
+const PROD_WARMUP_INTERVAL_MS = 45 * 60 * 1000;
+const PROD_WARMUP_RECENT_MS = 10 * 60 * 1000;
 const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621315d0";
 const DEVTEST_TARGET_HASH = "ae1860180228042c8481b07ac784542baf6acc14cdda4b8941555e70d67932b8";
 
@@ -17,6 +20,11 @@ let currentUsername = ""; // Stores user identity
 let currentSessionId = "";
 let queuePollingIntervalId = null;
 let storedDataStatusHideTimer = null;
+let productionWarmupIntervalId = null;
+let productionWarmupPromise = null;
+let productionWarmupPromiseKey = "";
+let productionWarmupLastAt = 0;
+let productionWarmupLastKey = "";
 
 function makeClientId(prefix = "id") {
     if (window.crypto?.randomUUID) return `${prefix}_${window.crypto.randomUUID()}`;
@@ -45,6 +53,10 @@ function previewUrlBase() {
 
 function clearSessionUrl() {
     return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_preview_session_clear" : "preview_session/clear"}`;
+}
+
+function warmupUrl() {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_warmup" : "warmup"}`;
 }
 
 function compatibilityUrl() {
@@ -474,6 +486,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
         }
         
         startQueuePolling(); // Boot up the live dashboard
+        startProductionWarmupPolling(); // Wake production without sending an analysis image.
         setStoredDataStatus("Loading saved data: fruit models, model versions, and processing batches...");
         const expertsLoaded = await loadExperts(); // Populate the fruit dropdown from the trained-expert registry
         setStoredDataStatus("Loading saved processing batches...");
@@ -738,6 +751,95 @@ function appendAnalysisSettings(formData, settings) {
     formData.append("scale_value", snapshot.scaleValue || "");
     formData.append("scale_unit", snapshot.scaleUnit || "cm_per_px");
     formData.append("traditional_settings", JSON.stringify(snapshot.traditionalSettings || {}));
+}
+
+function productionWarmupPayload(settings = null) {
+    const snapshot = settings || getAnalysisSettingsSnapshot();
+    return {
+        password: currentPassword,
+        username: currentUsername,
+        fruit_type: snapshot.fruit || "",
+        expert_id: snapshot.expertId || ""
+    };
+}
+
+function productionWarmupKey(payload) {
+    return `${payload.fruit_type || ""}::${payload.expert_id || ""}`;
+}
+
+function canWarmProduction() {
+    return Boolean(currentPassword) && !isDevUser();
+}
+
+async function warmProductionBackend(options = {}) {
+    const {
+        settings = null,
+        force = false,
+        statusEl = null,
+        statusText = "Warming up production server..."
+    } = options;
+    if (!canWarmProduction()) return { success: true, skipped: true };
+
+    const now = Date.now();
+    const payload = productionWarmupPayload(settings);
+    const key = productionWarmupKey(payload);
+    if (!force && productionWarmupLastAt && productionWarmupLastKey === key && now - productionWarmupLastAt < PROD_WARMUP_RECENT_MS) {
+        return { success: true, skipped: true, recent: true };
+    }
+    if (productionWarmupPromise) {
+        if (productionWarmupPromiseKey === key) return productionWarmupPromise;
+        await productionWarmupPromise;
+    }
+
+    if (statusEl && statusText) statusEl.innerText = statusText;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PROD_WARMUP_TIMEOUT_MS);
+    productionWarmupPromiseKey = key;
+    productionWarmupPromise = fetch(warmupUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+        cache: "no-store"
+    })
+        .then(async response => {
+            const text = await response.text();
+            let data = {};
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch (err) {
+                data = { success: false, message: `Warmup returned non-JSON response (${response.status})` };
+            }
+            if (!response.ok || data.success === false) {
+                throw new Error(data.message || `Warmup failed (${response.status})`);
+            }
+            productionWarmupLastAt = Date.now();
+            productionWarmupLastKey = key;
+            return data;
+        })
+        .catch(error => {
+            console.warn("Production warmup failed; continuing with normal processing.", error);
+            return { success: false, message: error.message || "Warmup failed." };
+        })
+        .finally(() => {
+            clearTimeout(timeoutId);
+            productionWarmupPromise = null;
+            productionWarmupPromiseKey = "";
+        });
+
+    return productionWarmupPromise;
+}
+
+function startProductionWarmupPolling() {
+    if (productionWarmupIntervalId) {
+        clearInterval(productionWarmupIntervalId);
+        productionWarmupIntervalId = null;
+    }
+    if (!canWarmProduction()) return;
+    warmProductionBackend({ force: true, statusText: "" });
+    productionWarmupIntervalId = setInterval(() => {
+        warmProductionBackend({ force: true, statusText: "" });
+    }, PROD_WARMUP_INTERVAL_MS);
 }
 
 function updateSettingsSliderLabels() {
@@ -2455,10 +2557,14 @@ function finishSingleProgress(run, { stopped = false } = {}) {
     }
 }
 
-function stopActiveSingleRun() {
+async function stopActiveSingleRun() {
     if (!activeSingleRun?.running) return;
+    const jobId = activeSingleRun.persistentJobId;
     activeSingleRun.stopRequested = true;
     activeSingleRun.abortController?.abort();
+    if (jobId) {
+        await controlProcessJobById(jobId, "stop");
+    }
 }
 
 document.getElementById("single-form").addEventListener("submit", async (e) => {
@@ -2473,6 +2579,7 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
         return;
     }
 
+    const requestSettings = getAnalysisSettingsSnapshot();
     const run = {
         abortController: new AbortController(),
         running: true,
@@ -2488,19 +2595,27 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
     startSingleProgress(run);
 
     try {
+        await warmProductionBackend({
+            settings: requestSettings,
+            statusEl: status,
+            statusText: "Warming up production server..."
+        });
+        if (run.stopRequested || activeSingleRun !== run) return;
+        status.innerText = "Processing...";
+
         const requestedPreviewIds = selectedPreviewIds();
-        const data = await postImage(
+        status.innerText = "Uploading image...";
+        const job = await createPersistentSingleJob(
             file,
+            requestSettings,
             requestedPreviewIds,
-            SINGLE_REQUEST_TIMEOUT_MS,
-            0,
-            run.abortController.signal,
-            getAnalysisSettingsSnapshot(),
-            null,
-            null,
-            null,
-            run.sessionId
-        );  // No retries for single images
+            run.abortController.signal
+        );
+        run.persistentJobId = job?.job_id || "";
+        if (job?.session_id) run.sessionId = job.session_id;
+        if (run.stopRequested || activeSingleRun !== run) return;
+
+        const data = await waitForSinglePersistentJob(run.persistentJobId, run, status);
         if (run.stopRequested || activeSingleRun !== run) return;
         
         if (data.success) {
@@ -2548,7 +2663,10 @@ document.getElementById("single-form").addEventListener("submit", async (e) => {
 document.getElementById("stop-single-btn")?.addEventListener("click", (event) => {
     if (!requireSecondStopClick(event.currentTarget)) return;
     resetStopConfirmation(event.currentTarget);
-    stopActiveSingleRun();
+    stopActiveSingleRun().catch(err => {
+        const status = document.getElementById("single-status");
+        if (status) status.innerText = `Stop failed: ${err.message}`;
+    });
 });
 
 let globalBatchResults = []; // Stores all row data for dynamic toggling
@@ -2771,13 +2889,13 @@ function applyPersistentJob(job, { restored = false } = {}) {
     if (restored) activateTab("bulk-panel");
 }
 
-async function fetchPersistentJob(jobId) {
+async function fetchPersistentJob(jobId, signal = null) {
     const params = new URLSearchParams({
         username: currentUsername,
         password: currentPassword,
         _t: Date.now().toString()
     });
-    const response = await fetch(`${processJobsUrl(`/${encodeURIComponent(jobId)}`)}?${params}`, { cache: "no-store" });
+    const response = await fetch(`${processJobsUrl(`/${encodeURIComponent(jobId)}`)}?${params}`, { cache: "no-store", signal });
     const data = await response.json();
     if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
     return data.job;
@@ -2864,6 +2982,66 @@ async function createPersistentBatchJob(files, settings) {
     startPersistentJobPolling(job.job_id);
 }
 
+async function createPersistentSingleJob(file, settings, previewIds, signal = null) {
+    const singleSettings = { ...(settings || {}), job_kind: "single" };
+    const form = new FormData();
+    form.append("password", currentPassword);
+    form.append("username", currentUsername);
+    form.append("settings_json", JSON.stringify(singleSettings));
+    form.append("requested_columns", JSON.stringify(selectedColumnIdsForRequest()));
+    form.append("preview_types", JSON.stringify(previewIds || []));
+    form.append("files", file);
+
+    const response = await fetch(processJobsUrl(), {
+        method: "POST",
+        body: form,
+        signal
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+        throw new Error(data.message || `HTTP ${response.status}`);
+    }
+    return data.job;
+}
+
+function singleStatusFromJob(job, row) {
+    if (!job) return "Processing...";
+    if (job.status === "uploading") return "Uploading image...";
+    if (job.status === "queued") return "Queued for processing...";
+    if (row?.status === "processing" || job.status === "running") return "Processing...";
+    if (job.status === "stopping") return "Stopping...";
+    return job.message || `Job ${job.status}`;
+}
+
+async function waitForSinglePersistentJob(jobId, run, statusEl) {
+    while (true) {
+        if (run.stopRequested) throw new Error("Batch stopped");
+        const job = await fetchPersistentJob(jobId, run.abortController?.signal || null);
+        const row = (job.rows || [])[0] || {};
+        if (statusEl) statusEl.innerText = singleStatusFromJob(job, row);
+
+        if (["completed", "stopped", "failed"].includes(job.status)) {
+            if (job.status === "stopped" || run.stopRequested) throw new Error("Batch stopped");
+            if (job.status === "failed") throw new Error(job.message || "Single image processing failed.");
+            const result = row.result || null;
+            if (result) return result;
+            if (row.success === false) {
+                return {
+                    success: false,
+                    filename: row.filename || "",
+                    session_id: job.session_id || job.job_id,
+                    row_id: row.row_id || "",
+                    message: row.message || "Single image processing failed.",
+                    warnings: row.message ? [row.message] : []
+                };
+            }
+            throw new Error(row.message || "Single image processing finished without a result.");
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+}
+
 async function refreshSavedJobSelector(selectedJobId = "") {
     const select = document.getElementById("saved-job-select");
     if (!currentUsername || !currentPassword) return [];
@@ -2879,7 +3057,9 @@ async function refreshSavedJobSelector(selectedJobId = "") {
     try {
         const response = await fetch(`${processJobsUrl()}?${params}`, { cache: "no-store" });
         const data = await response.json();
-        const jobs = data.success && Array.isArray(data.jobs) ? data.jobs : [];
+        const jobs = data.success && Array.isArray(data.jobs)
+            ? data.jobs.filter(job => (job.settings || {}).job_kind !== "single")
+            : [];
         if (select) {
             select.innerHTML = jobs.length
                 ? jobs.map(job => {
@@ -2920,17 +3100,23 @@ async function restoreLatestPersistentJob() {
     }
 }
 
-async function controlPersistentJob(action) {
-    if (!activeBatch?.persistentJobId) return false;
-    const response = await fetch(processJobsUrl(`/${encodeURIComponent(activeBatch.persistentJobId)}/${action}`), {
+async function controlProcessJobById(jobId, action) {
+    if (!jobId) return false;
+    const response = await fetch(processJobsUrl(`/${encodeURIComponent(jobId)}/${action}`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: currentUsername, password: currentPassword })
     });
     const data = await response.json();
     if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
-    startPersistentJobPolling(activeBatch.persistentJobId);
     return true;
+}
+
+async function controlPersistentJob(action) {
+    if (!activeBatch?.persistentJobId) return false;
+    const ok = await controlProcessJobById(activeBatch.persistentJobId, action);
+    startPersistentJobPolling(activeBatch.persistentJobId);
+    return ok;
 }
 
 function batchRowId(batch, index, file) {
@@ -4114,7 +4300,7 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     globalBatchResults = [];
     renderBulkTable();
     updateBatchJumpControls();
-    status.innerText = "Uploading batch to persistent backend storage...";
+    status.innerText = "Warming up production server...";
     activeBatch = makeBatchState(Array.from(files), batchSettings, shouldRequestLineOcr(selectedPreviewIds(), batchSettings));
     activeBatch.running = true;
     activeBatch.uploading = true;
@@ -4125,6 +4311,13 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     updateBatchProgress(activeBatch);
     startBatchLiveTimer(activeBatch);
     try {
+        await warmProductionBackend({
+            settings: batchSettings,
+            statusEl: status,
+            statusText: "Warming up production server..."
+        });
+        if (!activeBatch || activeBatch.stopRequested) return;
+        status.innerText = "Uploading batch to persistent backend storage...";
         await createPersistentBatchJob(files, batchSettings);
     } catch (err) {
         status.innerText = `Could not create persistent processing job: ${err.message}`;
