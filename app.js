@@ -459,23 +459,81 @@ async function sha256(message) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function saveSession() {
+    try {
+        sessionStorage.setItem("fp_session", JSON.stringify({
+            p: currentPassword,
+            u: currentUsername,
+            s: currentSessionId,
+            t: Date.now()
+        }));
+    } catch (_) { /* private browsing or quota */ }
+}
+
+function loadSavedSession() {
+    try {
+        const raw = sessionStorage.getItem("fp_session");
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data.p || !data.u || (Date.now() - data.t) > SESSION_MAX_AGE_MS) {
+            sessionStorage.removeItem("fp_session");
+            return null;
+        }
+        return data;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function enterApp() {
+    document.getElementById("login-view").style.display = "none";
+    document.getElementById("app-view").style.display = "block";
+    updateDevQueueToolsVisibility();
+    startQueuePolling();
+    startProductionWarmupPolling();
+    setStoredDataStatus("Loading saved data: fruit models, model versions, and processing batches...");
+    const expertsLoaded = await loadExperts();
+    setStoredDataStatus("Loading saved processing batches...");
+    const jobsLoaded = await restoreLatestPersistentJob();
+    if (expertsLoaded && jobsLoaded) {
+        setStoredDataStatus("Saved models, model versions, and processing batches loaded.", "ready", 3500);
+    } else {
+        setStoredDataStatus("Some saved data could not be loaded. Refresh or try again if something looks missing.", "warning", 6000);
+    }
+}
+
+// Auto-restore session on page load
+(async () => {
+    const saved = loadSavedSession();
+    if (saved) {
+        const expectedHash = saved.u.trim().toLowerCase() === "devtest" ? DEVTEST_TARGET_HASH : TARGET_HASH;
+        if (await sha256(saved.p) === expectedHash) {
+            currentPassword = saved.p;
+            currentUsername = saved.u;
+            currentSessionId = saved.s;
+            console.log(`Session restored for ${currentUsername}.`);
+            await enterApp();
+        }
+    }
+})();
+
 // --- NEW LOGIN LISTENER ---
 document.getElementById("login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const pwd = document.getElementById("login-password").value;
     const uname = document.getElementById("login-name").value.trim();
     const errorDiv = document.getElementById("login-error");
-    
+
     const digest = await sha256(pwd);
     const expectedHash = uname.trim().toLowerCase() === "devtest" ? DEVTEST_TARGET_HASH : TARGET_HASH;
     if (digest === expectedHash) {
         currentPassword = pwd;
         currentUsername = uname;
         currentSessionId = makeClientId("session");
+        saveSession();
         console.log(`Logged in as ${currentUsername}. Sending traffic via Proxy.`);
-        document.getElementById("login-view").style.display = "none";
-        document.getElementById("app-view").style.display = "block";
-        updateDevQueueToolsVisibility();
 
         // Track unique login name
         if (typeof gtag === 'function') {
@@ -484,21 +542,19 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
                 'username': currentUsername
             });
         }
-        
-        startQueuePolling(); // Boot up the live dashboard
-        startProductionWarmupPolling(); // Wake production without sending an analysis image.
-        setStoredDataStatus("Loading saved data: fruit models, model versions, and processing batches...");
-        const expertsLoaded = await loadExperts(); // Populate the fruit dropdown from the trained-expert registry
-        setStoredDataStatus("Loading saved processing batches...");
-        const jobsLoaded = await restoreLatestPersistentJob();
-        if (expertsLoaded && jobsLoaded) {
-            setStoredDataStatus("Saved models, model versions, and processing batches loaded.", "ready", 3500);
-        } else {
-            setStoredDataStatus("Some saved data could not be loaded. Refresh or try again if something looks missing.", "warning", 6000);
-        }
+
+        await enterApp();
     } else {
         errorDiv.innerText = "Incorrect password.";
     }
+});
+
+document.getElementById("toggle-password-btn")?.addEventListener("click", function () {
+    const pwd = document.getElementById("login-password");
+    const showing = pwd.type === "text";
+    pwd.type = showing ? "password" : "text";
+    this.textContent = showing ? "Show" : "Hide";
+    this.setAttribute("aria-label", showing ? "Show password" : "Hide password");
 });
 
 function hasLineOptionList(settings) {
@@ -939,6 +995,7 @@ function updateAnalysisTabAvailability() {
         button.classList.toggle("setup-locked", !ready);
         button.classList.toggle("setup-ready-highlight", ready && !analysisTabsClicked);
         button.setAttribute("aria-disabled", ready ? "false" : "true");
+        button.title = ready ? "" : "Complete the Analysis Setup first.";
     });
     const labelingButton = document.getElementById("labeling-tab");
     if (labelingButton) {
@@ -2433,7 +2490,7 @@ function renderSingleMetricCard(title, columns, item) {
             <h3>${escapeHtml(title)}</h3>
             ${metricColumns.map(column => `
                 <div class="metric-row">
-                    <span>${escapeHtml(column.label)}</span>
+                    <span>${columnHelpIcon(column)} ${escapeHtml(column.label)}</span>
                     <strong>${renderCell(column, item)}</strong>
                 </div>
             `).join("")}

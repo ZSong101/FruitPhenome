@@ -364,10 +364,13 @@
   <!-- THE NEW LOGIN SCREEN -->
   <div id="login-view" class="container" style="max-width: 400px; margin-top: 15vh; text-align: center;">
     <section class="card">
-      <h1 style="margin-top: 20px; margin-bottom: 25px;">Access App</h1>
+      <h1 style="margin-top: 20px; margin-bottom: 25px;">Fruit Phenotyping Platform</h1>
       <form id="login-form">
         <input type="text" id="login-name" placeholder="Enter Name (for analytics)" required style="padding: 10px; font-size: 16px; width: 100%; box-sizing: border-box; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px;">
-        <input type="password" id="login-password" placeholder="Enter Password" required style="padding: 10px; font-size: 16px; width: 100%; box-sizing: border-box; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px;">
+        <div style="position: relative; width: 100%; margin-bottom: 15px;">
+          <input type="password" id="login-password" placeholder="Enter Password" required style="padding: 10px; padding-right: 44px; font-size: 16px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;">
+          <button type="button" id="toggle-password-btn" aria-label="Show password" style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 4px 6px; cursor: pointer; color: #666; font-size: 13px; line-height: 1;">Show</button>
+        </div>
         <button type="submit" style="width: 100%; padding: 10px; font-size: 16px;">Login</button>
       </form>
       <div id="login-error" class="status" style="color: red; margin-top: 10px;"></div>
@@ -575,7 +578,7 @@
           <div id="wizard-summary" class="wizard-summary"></div>
           <div class="settings-column-toolbar">
             <div class="column-dropdown">
-              <button type="button" id="main-column-menu-button" aria-expanded="false">Columns</button>
+              <button type="button" id="main-column-menu-button" aria-expanded="false">Show/Hide Columns</button>
               <div id="main-column-menu-panel" class="column-menu-panel">
                 <div id="main-column-menu"></div>
               </div>
@@ -648,7 +651,7 @@
       <p class="muted supported-file-note">Supported file types: JPG, JPEG, and PNG.</p>
       <div class="analysis-toolbar single-toolbar">
         <div class="column-dropdown">
-          <button type="button" id="single-column-menu-button" aria-expanded="false">Columns</button>
+          <button type="button" id="single-column-menu-button" aria-expanded="false">Show/Hide Columns</button>
           <div id="single-column-menu-panel" class="column-menu-panel">
             <div id="single-column-menu"></div>
           </div>
@@ -683,7 +686,7 @@
       
       <div class="analysis-toolbar bulk-toolbar">
         <div class="column-dropdown">
-          <button type="button" id="column-menu-button" aria-expanded="false">Columns</button>
+          <button type="button" id="column-menu-button" aria-expanded="false">Show/Hide Columns</button>
           <div id="column-menu-panel" class="column-menu-panel">
             <div id="column-menu"></div>
           </div>
