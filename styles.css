@@ -311,6 +311,112 @@ button:hover {
   min-width: 58px;
 }
 
+.lightbox-legend-erasure {
+  display: none;
+  position: fixed;
+  z-index: 2;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.86);
+  border-radius: 4px;
+}
+
+.lightbox-legend-panel {
+  display: none;
+  position: fixed;
+  z-index: 4;
+  top: 72px;
+  right: 72px;
+  width: 280px;
+  min-width: 170px;
+  min-height: 110px;
+  max-width: min(62vw, 620px);
+  max-height: min(72vh, 720px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.94);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(5px);
+  color: #17232c;
+}
+
+.lightbox-legend-panel.visible {
+  display: flex;
+  flex-direction: column;
+}
+
+.lightbox-legend-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(42, 54, 65, 0.16);
+  background: rgba(229, 236, 242, 0.86);
+  color: #23313b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.lightbox-legend-header:active {
+  cursor: grabbing;
+}
+
+.lightbox-legend-drag-cue {
+  color: #697987;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: -3px;
+}
+
+.lightbox-legend-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.lightbox-legend-body img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px;
+}
+
+.lightbox-legend-resize {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  opacity: 0.72;
+}
+
+.lightbox-legend-resize::before,
+.lightbox-legend-resize::after {
+  content: "";
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  border-right: 2px solid rgba(73, 86, 98, 0.72);
+  border-bottom: 2px solid rgba(73, 86, 98, 0.72);
+  border-radius: 1px;
+}
+
+.lightbox-legend-resize::before {
+  width: 13px;
+  height: 13px;
+}
+
+.lightbox-legend-resize::after {
+  width: 7px;
+  height: 7px;
+}
+
 .studio-augment-preview img {
   width: min(100%, 720px);
   max-height: 72vh;
