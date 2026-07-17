@@ -1498,14 +1498,17 @@ function previewColumn(id, label, field, options = {}) {
         get: () => null,
         html: (item) => {
             const contextAttrs = previewContextAttributes(item.data, field, options.adjustable);
+            const displayUrl = previewDisplayUrl(item.data, field);
+            const legendUrl = previewLegendUrl(item.data, field);
             if (item.data?.[field]) {
                 const fullUrl = previewFetchUrl(item.data, field, "full");
-                return `<img src="data:image/jpeg;base64,${item.data[field]}" data-full-src="${escapeHtml(fullUrl || `data:image/jpeg;base64,${item.data[field]}`)}" ${contextAttrs} class="thumb preview-img">`;
+                const fallbackDataUrl = `data:image/jpeg;base64,${item.data[field]}`;
+                return `<img src="${fallbackDataUrl}" data-full-src="${escapeHtml(fullUrl || fallbackDataUrl)}" data-display-src="${escapeHtml(displayUrl || fullUrl || fallbackDataUrl)}" data-legend-src="${escapeHtml(legendUrl)}" ${contextAttrs} class="thumb preview-img">`;
             }
             const thumbUrl = previewFetchUrl(item.data, field, "thumb");
             const fullUrl = previewFetchUrl(item.data, field, "full");
             if (thumbUrl) {
-                return `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" ${contextAttrs} class="thumb preview-img">`;
+                return `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" data-display-src="${escapeHtml(displayUrl || fullUrl || thumbUrl)}" data-legend-src="${escapeHtml(legendUrl)}" ${contextAttrs} class="thumb preview-img">`;
             }
             return itemHasPendingColumn(item, id)
                 ? `<span class="muted">Computing...</span>`
@@ -2110,6 +2113,22 @@ function previewFetchUrl(data, previewType, size = "thumb") {
     return `${previewUrlBase()}/${encodeURIComponent(data.session_id)}/${encodeURIComponent(data.row_id)}/${encodeURIComponent(previewType)}?${params.toString()}`;
 }
 
+function previewVariantUrl(data, previewType, size) {
+    const ref = data?.preview_refs?.[previewType];
+    if (!ref?.available) return "";
+    if (size === "display" && !ref.display_available) return "";
+    if (size === "legend" && !ref.legend_available) return "";
+    return previewFetchUrl(data, previewType, size);
+}
+
+function previewDisplayUrl(data, previewType) {
+    return previewVariantUrl(data, previewType, "display") || previewFetchUrl(data, previewType, "full");
+}
+
+function previewLegendUrl(data, previewType) {
+    return previewVariantUrl(data, previewType, "legend");
+}
+
 function columnValue(column, item) {
     try {
         return column.get ? column.get(item.data || {}, item) : null;
@@ -2516,14 +2535,17 @@ function renderSinglePreviewCards(data, previewIds) {
         const imageData = data[column.id];
         const thumbUrl = previewFetchUrl(data, column.id, "thumb");
         const fullUrl = previewFetchUrl(data, column.id, "full");
+        const displayUrl = previewDisplayUrl(data, column.id);
+        const legendUrl = previewLegendUrl(data, column.id);
         const contextAttrs = previewContextAttributes(data, column.id, column.adjustable);
+        const fallbackDataUrl = imageData ? `data:image/jpeg;base64,${imageData}` : "";
         return `
             <div class="result-card single-preview-card ${column.adjustable ? "adjustable-preview-card" : ""}">
                 <h3>${escapeHtml(column.label)}</h3>
                 ${imageData
-                    ? `<img src="data:image/jpeg;base64,${imageData}" data-full-src="${escapeHtml(fullUrl || `data:image/jpeg;base64,${imageData}`)}" ${contextAttrs} class="preview-img single-preview-img">`
+                    ? `<img src="${fallbackDataUrl}" data-full-src="${escapeHtml(fullUrl || fallbackDataUrl)}" data-display-src="${escapeHtml(displayUrl || fullUrl || fallbackDataUrl)}" data-legend-src="${escapeHtml(legendUrl)}" ${contextAttrs} class="preview-img single-preview-img">`
                     : thumbUrl
-                        ? `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" ${contextAttrs} class="preview-img single-preview-img">`
+                        ? `<img src="${escapeHtml(thumbUrl)}" data-full-src="${escapeHtml(fullUrl || thumbUrl)}" data-display-src="${escapeHtml(displayUrl || fullUrl || thumbUrl)}" data-legend-src="${escapeHtml(legendUrl)}" ${contextAttrs} class="preview-img single-preview-img">`
                         : `<span class="muted">Preview unavailable</span>`}
             </div>
         `;
@@ -4664,35 +4686,16 @@ const lightboxZoomControls = document.getElementById("lightbox-zoom-controls");
 const lightboxZoomOut = document.getElementById("lightbox-zoom-out");
 const lightboxZoomReset = document.getElementById("lightbox-zoom-reset");
 const lightboxZoomIn = document.getElementById("lightbox-zoom-in");
+const lightboxSavePreview = document.getElementById("lightbox-save-preview");
 const lightboxLegendPanel = document.getElementById("lightbox-legend-panel");
 const lightboxLegendHeader = document.getElementById("lightbox-legend-header");
 const lightboxLegendImg = document.getElementById("lightbox-legend-img");
 const lightboxLegendResize = document.getElementById("lightbox-legend-resize");
-const lightboxLegendErasure = document.getElementById("lightbox-legend-erasure");
 let lightboxPreviewContext = null;
 let lightboxTransform = { scale: 1, x: 0, y: 0 };
 let lightboxDrag = null;
-let lightboxLegendCrop = null;
 let lightboxLegendDrag = null;
 let lightboxLegendResizeDrag = null;
-
-const LIGHTBOX_LEGEND_PREVIEW_TYPES = new Set([
-    "image_pre_calibration_base64",
-    "image_raw_base64",
-    "image_cleanup_hybrid_base64",
-    "image_combined_base64",
-    "image_traditional_base64",
-    "image_sm_base64"
-]);
-
-const LIGHTBOX_LEGEND_ENTRY_ESTIMATES = {
-    image_pre_calibration_base64: 5,
-    image_raw_base64: 7,
-    image_cleanup_hybrid_base64: 10,
-    image_combined_base64: 12,
-    image_traditional_base64: 18,
-    image_sm_base64: 12
-};
 
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -4703,7 +4706,6 @@ function renderLightboxTransform() {
     lightboxImg.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
     lightboxImg.classList.toggle("zoomed", scale > 1.001);
     if (lightboxZoomReset) lightboxZoomReset.innerText = `${Math.round(scale * 100)}%`;
-    updateLightboxLegendErasure();
 }
 
 function resetLightboxTransform() {
@@ -4723,144 +4725,6 @@ function setLightboxScale(nextScale) {
     renderLightboxTransform();
 }
 
-function previewUsesEmbeddedLegend(previewContext) {
-    return LIGHTBOX_LEGEND_PREVIEW_TYPES.has(previewContext?.previewType || "");
-}
-
-function estimateLegendCrop(img, previewType) {
-    const w = img.naturalWidth || 0;
-    const h = img.naturalHeight || 0;
-    if (!w || !h) return null;
-    const pad = Math.max(8, Math.round(w * 0.008));
-    const count = LIGHTBOX_LEGEND_ENTRY_ESTIMATES[previewType] || 9;
-    const lineH = w < 1400 ? 20 : 26;
-    const cropW = Math.min(w - 2 * pad, Math.max(250, Math.round(w * 0.34)));
-    const cropH = Math.min(h - 2 * pad, Math.max(130, (count + 1) * lineH + 2 * pad));
-    return {
-        x: pad,
-        y: Math.max(pad, h - cropH - pad),
-        width: cropW,
-        height: cropH
-    };
-}
-
-function detectLegendCrop(img) {
-    const w = img.naturalWidth || 0;
-    const h = img.naturalHeight || 0;
-    if (w < 80 || h < 80) return null;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0, w, h);
-
-    const data = ctx.getImageData(0, 0, w, h).data;
-    const xLimit = Math.max(60, Math.floor(w * 0.58));
-    const yStart = Math.max(0, Math.floor(h * 0.28));
-    const rowCounts = new Uint32Array(h);
-
-    const isLegendLike = (idx) => {
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-        const maxC = Math.max(r, g, b);
-        const minC = Math.min(r, g, b);
-        const bright = (r + g + b) / 3;
-        return bright > 150 && (maxC - minC < 95 || bright > 205);
-    };
-
-    for (let y = yStart; y < h; y++) {
-        let count = 0;
-        let rowOffset = y * w * 4;
-        for (let x = 0; x < xLimit; x++) {
-            if (isLegendLike(rowOffset + x * 4)) count++;
-        }
-        rowCounts[y] = count;
-    }
-
-    const minRowCount = Math.max(24, Math.floor(xLimit * 0.14));
-    let bestRun = null;
-    let runStart = null;
-    let runScore = 0;
-    for (let y = yStart; y <= h; y++) {
-        const active = y < h && rowCounts[y] >= minRowCount;
-        if (active && runStart === null) {
-            runStart = y;
-            runScore = 0;
-        }
-        if (active) runScore += rowCounts[y];
-        if ((!active || y === h) && runStart !== null) {
-            const runEnd = y - 1;
-            const runHeight = runEnd - runStart + 1;
-            const reachesLowerImage = runEnd > h * 0.52;
-            if (runHeight > Math.max(28, h * 0.035) && reachesLowerImage) {
-                const candidate = { y0: runStart, y1: runEnd, score: runScore };
-                if (!bestRun || candidate.score > bestRun.score) bestRun = candidate;
-            }
-            runStart = null;
-            runScore = 0;
-        }
-    }
-    if (!bestRun) return null;
-
-    const colCounts = new Uint32Array(xLimit);
-    for (let y = bestRun.y0; y <= bestRun.y1; y++) {
-        const rowOffset = y * w * 4;
-        for (let x = 0; x < xLimit; x++) {
-            if (isLegendLike(rowOffset + x * 4)) colCounts[x]++;
-        }
-    }
-
-    const runHeight = bestRun.y1 - bestRun.y0 + 1;
-    const minColCount = Math.max(18, Math.floor(runHeight * 0.32));
-    let bestColRun = null;
-    let colStart = null;
-    let colScore = 0;
-    for (let x = 0; x <= xLimit; x++) {
-        const active = x < xLimit && colCounts[x] >= minColCount;
-        if (active && colStart === null) {
-            colStart = x;
-            colScore = 0;
-        }
-        if (active) colScore += colCounts[x];
-        if ((!active || x === xLimit) && colStart !== null) {
-            const colEnd = x - 1;
-            const colWidth = colEnd - colStart + 1;
-            const nearLeft = colStart < w * 0.12;
-            if (colWidth > Math.max(80, w * 0.08) && nearLeft) {
-                const candidate = { x0: colStart, x1: colEnd, score: colScore };
-                if (!bestColRun || candidate.score > bestColRun.score) bestColRun = candidate;
-            }
-            colStart = null;
-            colScore = 0;
-        }
-    }
-    if (!bestColRun) return null;
-
-    const pad = Math.max(4, Math.round(w * 0.004));
-    const x0 = clamp(bestColRun.x0 - pad, 0, w - 1);
-    const y0 = clamp(bestRun.y0 - pad, 0, h - 1);
-    const x1 = clamp(bestColRun.x1 + pad, x0 + 1, w);
-    const y1 = clamp(bestRun.y1 + pad, y0 + 1, h);
-    return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
-}
-
-function updateLightboxLegendErasure() {
-    if (!lightboxLegendErasure || !lightboxLegendCrop || lightboxImg.style.display === "none") return;
-    const naturalW = lightboxImg.naturalWidth || 0;
-    const naturalH = lightboxImg.naturalHeight || 0;
-    if (!naturalW || !naturalH) return;
-    const rect = lightboxImg.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-
-    lightboxLegendErasure.style.left = `${rect.left + (lightboxLegendCrop.x / naturalW) * rect.width}px`;
-    lightboxLegendErasure.style.top = `${rect.top + (lightboxLegendCrop.y / naturalH) * rect.height}px`;
-    lightboxLegendErasure.style.width = `${(lightboxLegendCrop.width / naturalW) * rect.width}px`;
-    lightboxLegendErasure.style.height = `${(lightboxLegendCrop.height / naturalH) * rect.height}px`;
-    lightboxLegendErasure.style.display = "block";
-}
-
 function clampLegendPanelToViewport() {
     if (!lightboxLegendPanel) return;
     const rect = lightboxLegendPanel.getBoundingClientRect();
@@ -4873,7 +4737,6 @@ function clampLegendPanelToViewport() {
 }
 
 function resetLightboxLegend() {
-    lightboxLegendCrop = null;
     lightboxLegendDrag = null;
     lightboxLegendResizeDrag = null;
     if (lightboxLegendPanel) {
@@ -4884,55 +4747,32 @@ function resetLightboxLegend() {
         lightboxLegendPanel.style.width = "280px";
         lightboxLegendPanel.style.height = "";
     }
-    if (lightboxLegendImg) lightboxLegendImg.src = "";
-    if (lightboxLegendErasure) lightboxLegendErasure.style.display = "none";
+    if (lightboxLegendImg) {
+        lightboxLegendImg.onload = null;
+        lightboxLegendImg.onerror = null;
+        lightboxLegendImg.src = "";
+    }
 }
 
-function setupLightboxLegendFromImage() {
-    if (!previewUsesEmbeddedLegend(lightboxPreviewContext) || !lightboxLegendPanel || !lightboxLegendImg) {
+function setupLightboxLegendFromUrl(legendSrc) {
+    if (!legendSrc || !lightboxLegendPanel || !lightboxLegendImg) {
         resetLightboxLegend();
         return;
     }
 
-    let crop = null;
-    try {
-        crop = detectLegendCrop(lightboxImg);
-    } catch (err) {
-        console.warn("Could not detect preview legend crop; using estimate if possible.", err);
-    }
-    crop = crop || estimateLegendCrop(lightboxImg, lightboxPreviewContext?.previewType || "");
-    if (!crop) {
-        resetLightboxLegend();
-        return;
-    }
-
-    try {
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(crop.width));
-        canvas.height = Math.max(1, Math.round(crop.height));
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(
-            lightboxImg,
-            crop.x,
-            crop.y,
-            crop.width,
-            crop.height,
-            0,
-            0,
-            canvas.width,
-            canvas.height
-        );
-        lightboxLegendImg.src = canvas.toDataURL("image/png");
-        lightboxLegendCrop = crop;
-        const defaultWidth = clamp(Math.round(crop.width * 0.82), 220, Math.min(430, window.innerWidth - 48));
+    lightboxLegendImg.onload = () => {
+        const aspect = (lightboxLegendImg.naturalWidth || 1) / Math.max(1, lightboxLegendImg.naturalHeight || 1);
+        const defaultWidth = clamp(Math.round((lightboxLegendImg.naturalWidth || 320) * 0.8), 220, Math.min(460, window.innerWidth - 48));
+        const defaultHeight = clamp(Math.round(defaultWidth / aspect) + 46, 120, Math.min(620, window.innerHeight - 48));
         lightboxLegendPanel.style.width = `${defaultWidth}px`;
+        lightboxLegendPanel.style.height = `${defaultHeight}px`;
         lightboxLegendPanel.classList.add("visible");
         clampLegendPanelToViewport();
-        updateLightboxLegendErasure();
-    } catch (err) {
-        console.warn("Could not create detached preview legend.", err);
+    };
+    lightboxLegendImg.onerror = () => {
         resetLightboxLegend();
-    }
+    };
+    lightboxLegendImg.src = legendSrc;
 }
 
 function closeLightbox() {
@@ -4947,6 +4787,11 @@ function closeLightbox() {
         lightboxStatus.style.display = "none";
     }
     if (lightboxAdjustBtn) lightboxAdjustBtn.style.display = "none";
+    lightboxSavePreview?.classList.remove("visible");
+    if (lightboxSavePreview) {
+        lightboxSavePreview.removeAttribute("href");
+        lightboxSavePreview.removeAttribute("download");
+    }
     lightboxZoomControls?.classList.remove("visible");
     resetLightboxLegend();
     resetLightboxTransform();
@@ -4962,16 +4807,26 @@ function openLightbox(fullSrc, fallbackSrc = "", previewContext = null) {
     if (lightboxAdjustBtn) {
         lightboxAdjustBtn.style.display = previewContext?.adjustable ? "inline-flex" : "none";
     }
+    if (lightboxSavePreview) {
+        const saveSrc = previewContext?.fullSrc || primarySrc;
+        if (saveSrc) {
+            const safeName = (previewContext?.filename || previewContext?.previewType || "preview")
+                .replace(/\.[^.]+$/, "")
+                .replace(/[^A-Za-z0-9._-]+/g, "_")
+                .slice(0, 80) || "preview";
+            lightboxSavePreview.href = saveSrc;
+            lightboxSavePreview.download = `${safeName}_${previewContext?.previewType || "preview"}.jpg`;
+            lightboxSavePreview.classList.add("visible");
+        } else {
+            lightboxSavePreview.classList.remove("visible");
+        }
+    }
     lightboxImg.style.display = "none";
     lightboxImg.onload = null;
     lightboxImg.onerror = null;
     lightboxImg.src = "";
     resetLightboxLegend();
-    if (/^https?:/i.test(primarySrc)) {
-        lightboxImg.crossOrigin = "anonymous";
-    } else {
-        lightboxImg.removeAttribute("crossorigin");
-    }
+    lightboxImg.removeAttribute("crossorigin");
     if (lightboxStatus) {
         lightboxStatus.innerText = "Loading...";
         lightboxStatus.style.display = "block";
@@ -4985,7 +4840,7 @@ function openLightbox(fullSrc, fallbackSrc = "", previewContext = null) {
         lightboxImg.style.display = "block";
         lightboxZoomControls?.classList.add("visible");
         resetLightboxTransform();
-        setupLightboxLegendFromImage();
+        setupLightboxLegendFromUrl(lightboxPreviewContext?.legendSrc || "");
     };
 
     lightboxImg.onerror = () => {
@@ -5004,11 +4859,13 @@ function openLightbox(fullSrc, fallbackSrc = "", previewContext = null) {
 // Listen for clicks on ANY image with the 'preview-img' class
 document.body.addEventListener("click", (e) => {
     if (e.target && e.target.classList.contains("preview-img")) {
-        openLightbox(e.target.dataset.fullSrc || "", e.target.src || "", {
+        openLightbox(e.target.dataset.displaySrc || e.target.dataset.fullSrc || "", e.target.src || "", {
             previewType: e.target.dataset.previewType || "",
             sessionId: e.target.dataset.sessionId || "",
             rowId: e.target.dataset.rowId || "",
             filename: e.target.dataset.filename || "",
+            fullSrc: e.target.dataset.fullSrc || "",
+            legendSrc: e.target.dataset.legendSrc || "",
             adjustable: e.target.dataset.adjustable === "true"
         });
     }
@@ -5167,7 +5024,6 @@ lightboxLegendResize?.addEventListener("pointercancel", endLightboxLegendResize)
 window.addEventListener("resize", () => {
     if (lightbox?.style.display === "flex") {
         clampLegendPanelToViewport();
-        updateLightboxLegendErasure();
     }
 });
 

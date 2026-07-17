@@ -311,13 +311,31 @@ button:hover {
   min-width: 58px;
 }
 
-.lightbox-legend-erasure {
+.lightbox-save-preview {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  z-index: 3;
   display: none;
-  position: fixed;
-  z-index: 2;
-  pointer-events: none;
-  background: rgba(0, 0, 0, 0.86);
-  border-radius: 4px;
+  min-height: 34px;
+  align-items: center;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 7px;
+  background: rgba(25, 32, 40, 0.76);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  backdrop-filter: blur(5px);
+}
+
+.lightbox-save-preview.visible {
+  display: inline-flex;
+}
+
+.lightbox-save-preview:hover {
+  background: rgba(25, 32, 40, 0.9);
 }
 
 .lightbox-legend-panel {
@@ -394,6 +412,7 @@ button:hover {
   height: 18px;
   cursor: nwse-resize;
   opacity: 0.72;
+  touch-action: none;
 }
 
 .lightbox-legend-resize::before,
