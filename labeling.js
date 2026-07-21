@@ -6,18 +6,21 @@
 (function () {
     "use strict";
 
-    const LAYERS = ["whole", "flesh_left", "flesh_right"];
-    const LAYER_LABELS = {
-        whole: "Whole fruit",
-        flesh_left: "Flesh left",
-        flesh_right: "Flesh right"
-    };
-    // RGB colors matching the training preview palette.
-    const LAYER_COLORS = {
-        whole: [0, 220, 220],
-        flesh_left: [40, 220, 60],
-        flesh_right: [235, 60, 220]
-    };
+    const DEFAULT_CLASS_LAYERS = [
+        { id: "whole", label: "Whole fruit", class_name: "watermelon_whole", color: [0, 220, 220], required: true },
+        { id: "flesh_left", label: "Flesh left", class_name: "flesh_left", color: [40, 220, 60], required: false },
+        { id: "flesh_right", label: "Flesh right", class_name: "flesh_right", color: [235, 60, 220], required: false }
+    ];
+    const DEFAULT_LAYER_COLORS = [
+        [0, 220, 220], [40, 220, 60], [235, 60, 220], [255, 150, 30],
+        [80, 150, 255], [180, 90, 245], [255, 215, 0], [40, 210, 200],
+        [230, 80, 105], [120, 210, 80], [150, 130, 255], [255, 120, 210]
+    ];
+    const MAX_CLASS_LAYERS = 24;
+    let classLayers = DEFAULT_CLASS_LAYERS.map((layer, idx) => ({ ...layer, class_id: idx }));
+    let LAYERS = classLayers.map((layer) => layer.id);
+    let LAYER_LABELS = Object.fromEntries(classLayers.map((layer) => [layer.id, layer.label]));
+    let LAYER_COLORS = Object.fromEntries(classLayers.map((layer) => [layer.id, layer.color]));
     const MAX_DISPLAY_SIDE = 860;
     const MAX_UNDO = 14;
     const DOUBLE_CLICK_MS = 260;
@@ -145,6 +148,9 @@
             canvasHost: el("studio-canvas-host"),
             canvasEmpty: el("studio-canvas-empty"),
             layerButtons: el("studio-layer-buttons"),
+            layerAddBtn: el("studio-layer-add-btn"),
+            layerRenameBtn: el("studio-layer-rename-btn"),
+            layerDeleteBtn: el("studio-layer-delete-btn"),
             brushBtn: el("studio-brush-btn"),
             eraserBtn: el("studio-eraser-btn"),
             brushSize: el("studio-brush-size"),
@@ -164,6 +170,99 @@
         return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
             { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
         ));
+    }
+
+    function safeLayerId(value, fallback = "class") {
+        const raw = String(value || fallback).trim();
+        const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 72);
+        return cleaned || fallback;
+    }
+
+    function classNameFromLabel(label, fallback = "class") {
+        const cleaned = String(label || fallback)
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "")
+            .slice(0, 48);
+        return cleaned || fallback;
+    }
+
+    function normalizeClassLayers(layers) {
+        const source = Array.isArray(layers) && layers.length ? layers : DEFAULT_CLASS_LAYERS;
+        const usedIds = new Set();
+        const usedNames = new Set();
+        const out = [];
+        source.slice(0, MAX_CLASS_LAYERS).forEach((item, idx) => {
+            const entry = typeof item === "string" ? { id: item, label: item, class_name: item } : (item || {});
+            const label = String(entry.label || entry.name || entry.class_name || entry.id || `Class ${idx + 1}`).trim();
+            let id = safeLayerId(entry.id || classNameFromLabel(label, `class_${idx + 1}`), `class_${idx + 1}`);
+            const idBase = id;
+            let idSuffix = 2;
+            while (usedIds.has(id)) id = `${idBase}_${idSuffix++}`;
+            usedIds.add(id);
+
+            let className = classNameFromLabel(entry.class_name || label, id);
+            const nameBase = className;
+            let nameSuffix = 2;
+            while (usedNames.has(className)) className = `${nameBase}_${nameSuffix++}`;
+            usedNames.add(className);
+
+            const color = Array.isArray(entry.color) && entry.color.length >= 3
+                ? entry.color.slice(0, 3).map((c) => Math.max(0, Math.min(255, Number(c) || 0)))
+                : DEFAULT_LAYER_COLORS[idx % DEFAULT_LAYER_COLORS.length];
+            out.push({
+                id,
+                label,
+                class_name: className,
+                class_id: out.length,
+                color,
+                required: Boolean(entry.required || (out.length === 0 && id === "whole"))
+            });
+        });
+        return out.length ? out : DEFAULT_CLASS_LAYERS.map((layer, idx) => ({ ...layer, class_id: idx }));
+    }
+
+    function schemaSignature(layers) {
+        return normalizeClassLayers(layers).map((layer) => `${layer.id}:${layer.class_name}`).join("|");
+    }
+
+    function currentClassLayersPayload() {
+        return classLayers.map((layer, idx) => ({
+            id: layer.id,
+            label: layer.label,
+            class_name: layer.class_name,
+            class_id: idx,
+            color: layer.color,
+            required: Boolean(layer.required)
+        }));
+    }
+
+    function setClassLayers(nextLayers, options = {}) {
+        const preserveMasks = options.preserveMasks !== false;
+        const normalized = normalizeClassLayers(nextLayers);
+        const nextIds = normalized.map((layer) => layer.id);
+        classLayers = normalized;
+        LAYERS = nextIds;
+        LAYER_LABELS = Object.fromEntries(normalized.map((layer) => [layer.id, layer.label]));
+        LAYER_COLORS = Object.fromEntries(normalized.map((layer) => [layer.id, layer.color]));
+
+        Object.keys(layerOpacity).forEach((layer) => {
+            if (!nextIds.includes(layer)) delete layerOpacity[layer];
+        });
+        normalized.forEach((layer) => {
+            if (layerOpacity[layer.id] == null) layerOpacity[layer.id] = 0.55;
+            if (preserveMasks && baseImage && imgW && imgH && !layerCanvas[layer.id]) {
+                layerCanvas[layer.id] = newLayerCanvas();
+            }
+        });
+        Object.keys(layerCanvas).forEach((layer) => {
+            if (!nextIds.includes(layer)) delete layerCanvas[layer];
+        });
+        if (!nextIds.includes(activeLayer)) activeLayer = nextIds[0] || "whole";
+        renderLayerButtons();
+        updateButtons();
+        composite();
     }
 
     function setStatus(message, isError) {
@@ -237,6 +336,23 @@
         return expectBlob ? response.blob() : response.json();
     }
 
+    async function apiPutJson(path, body) {
+        const response = await fetch(datasetApiUrl(path), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...body, password: currentPassword, username: currentUsername })
+        });
+        if (!response.ok) {
+            let detail = "";
+            try {
+                const data = await response.json();
+                detail = data.detail || data.message || "";
+            } catch (_err) {}
+            throw new Error(detail || `Server responded with ${response.status}`);
+        }
+        return response.json();
+    }
+
     async function apiSendForm(path, method, formData) {
         formData.append("password", currentPassword);
         formData.append("username", currentUsername);
@@ -269,13 +385,10 @@
             const fruit = String(item.fruit_type || "").replace(/_/g, " ") || "unknown fruit";
             const lastUsed = Number(item.last_used_hours);
             const lastUsedText = Number.isFinite(lastUsed) ? ` · ${lastUsed.toFixed(1)} h since last use` : "";
-            const expiryText = kind === "datasets" && source === "remote" && item.stale_delete_warning
-                ? ` · deletes in ${Number(item.hours_until_expiry || 0).toFixed(1)} h`
-                : "";
             const meta = kind === "datasets"
-                ? `${fruit} · ${item.owner_username || "global"} · ${item.image_count || 0} images${lastUsedText}${expiryText}`
+                ? `${fruit} · ${item.owner_username || "global"} · ${item.image_count || 0} images${lastUsedText}`
                 : `${fruit} · v${item.version || "?"} · ${item.status || "unknown"}`;
-            return `<label class="studio-sync-item ${item.stale_delete_warning && source === "remote" ? "stale-warning" : ""}">
+            return `<label class="studio-sync-item">
                 <input type="checkbox" data-sync-source="${source}" data-sync-kind="${kind}" value="${esc(id)}">
                 <span>${esc(title)}<small>${esc(id)} · ${esc(meta)}</small></span>
             </label>`;
@@ -727,18 +840,18 @@
             const data = await apiGetJson("");
             if (!data.success) throw new Error(data.message || "Could not load datasets.");
             const selected = selectedStudioFruit();
-            datasetSummaries = (data.datasets || []).filter((ds) => (
-                !selected || selected === "other" || String(ds.fruit_type || "watermelon").toLowerCase() === selected.toLowerCase()
-            ));
+            const activeProjectId = typeof window.activeFruitProjectId === "function" ? window.activeFruitProjectId() : "";
+            datasetSummaries = (data.datasets || []).filter((ds) => {
+                const fruitMatches = !selected || selected === "other" || String(ds.fruit_type || "watermelon").toLowerCase() === selected.toLowerCase();
+                const projectMatches = !activeProjectId || String(ds.project_id || "") === activeProjectId;
+                return fruitMatches && projectMatches;
+            });
             const options = [`<option value="">Select dataset...</option>`];
             datasetSummaries.forEach((ds) => {
                 const fruit = String(ds.fruit_type || "watermelon").replace(/_/g, " ");
                 const lastUsed = Number(ds.last_used_hours);
                 const lastUsedText = Number.isFinite(lastUsed) ? ` · ${lastUsed.toFixed(1)} h since last use` : "";
-                const expiryText = ds.stale_delete_warning
-                    ? ` · deletes in ${Number(ds.hours_until_expiry || 0).toFixed(1)} h`
-                    : "";
-                options.push(`<option value="${esc(ds.dataset_id)}">${esc(ds.name)} · ${esc(fruit)} (${ds.image_count} img)${esc(lastUsedText)}${esc(expiryText)}</option>`);
+                options.push(`<option value="${esc(ds.dataset_id)}">${esc(ds.name)} · ${esc(fruit)} (${ds.image_count} img)${esc(lastUsedText)}</option>`);
             });
             options.push(`<option value="__new__">+ Create new dataset...</option>`);
             d.datasetSelect.innerHTML = options.join("");
@@ -769,6 +882,8 @@
         currentDatasetId = datasetId || null;
         currentImageId = null;
         clearCanvas();
+        const summary = currentDatasetSummary();
+        setClassLayers(summary?.class_layers || selectedExpertLayers() || DEFAULT_CLASS_LAYERS, { preserveMasks: false });
         const d = dom();
         if (d.augmentPreview) {
             d.augmentPreview.classList.remove("visible");
@@ -795,6 +910,149 @@
         return datasetSummaries.find((ds) => ds.dataset_id === currentDatasetId) || null;
     }
 
+    function updateCurrentDatasetSummary(summary) {
+        if (!summary?.dataset_id) return;
+        const idx = datasetSummaries.findIndex((ds) => ds.dataset_id === summary.dataset_id);
+        if (idx >= 0) datasetSummaries[idx] = { ...datasetSummaries[idx], ...summary };
+        else datasetSummaries.push(summary);
+    }
+
+    function selectedExpertLayers() {
+        if (typeof window.selectedExpertClassLayers === "function") {
+            return window.selectedExpertClassLayers();
+        }
+        return null;
+    }
+
+    function layersDiffer(a, b) {
+        return schemaSignature(a) !== schemaSignature(b);
+    }
+
+    async function saveClassLayersToDataset(statusMessage = "Class labels saved.") {
+        if (!currentDatasetId) {
+            setStatus("Select or create a dataset before editing class labels.", true);
+            return false;
+        }
+        try {
+            const data = await apiPutJson(`/${currentDatasetId}/class_layers`, {
+                class_layers: currentClassLayersPayload()
+            });
+            if (!data.success) throw new Error(data.message || "Could not save class labels.");
+            updateCurrentDatasetSummary(data.dataset);
+            if (data.dataset?.class_layers) setClassLayers(data.dataset.class_layers, { preserveMasks: true });
+            await Promise.all([loadImageList(), loadTrainingTarget()]);
+            setStatus(statusMessage);
+            return true;
+        } catch (err) {
+            setStatus(`Class label save failed: ${err.message}`, true);
+            return false;
+        }
+    }
+
+    function layerHasPaint(layer) {
+        const canvas = layerCanvas[layer];
+        if (!canvas || !imgW || !imgH) return false;
+        const data = canvas.getContext("2d").getImageData(0, 0, imgW, imgH).data;
+        for (let i = 3; i < data.length; i += 4) {
+            if (data[i] > 0) return true;
+        }
+        return false;
+    }
+
+    async function addClassLayer() {
+        if (!currentDatasetId) {
+            setStatus("Create or select a dataset before adding labels.", true);
+            return;
+        }
+        if (classLayers.length >= MAX_CLASS_LAYERS) {
+            setStatus(`This dataset already has the maximum of ${MAX_CLASS_LAYERS} labels.`, true);
+            return;
+        }
+        const label = window.prompt("New class label:", `Flesh chamber ${classLayers.length}`);
+        if (label === null) return;
+        const trimmed = label.trim();
+        if (!trimmed) {
+            setStatus("Class label cannot be blank.", true);
+            return;
+        }
+        const layers = currentClassLayersPayload();
+        layers.push({
+            id: safeLayerId(classNameFromLabel(trimmed, `class_${layers.length + 1}`), `class_${layers.length + 1}`),
+            label: trimmed,
+            class_name: classNameFromLabel(trimmed, `class_${layers.length + 1}`),
+            color: DEFAULT_LAYER_COLORS[layers.length % DEFAULT_LAYER_COLORS.length],
+            required: false
+        });
+        setClassLayers(layers, { preserveMasks: true });
+        activeLayer = classLayers[classLayers.length - 1]?.id || activeLayer;
+        await saveClassLayersToDataset(`Added class label '${trimmed}'.`);
+        setActiveLayer(activeLayer);
+    }
+
+    async function renameClassLayer() {
+        if (!currentDatasetId || !activeLayer) {
+            setStatus("Select a dataset and class label first.", true);
+            return;
+        }
+        const existing = classLayers.find((layer) => layer.id === activeLayer);
+        if (!existing) return;
+        const label = window.prompt("Rename selected class label:", existing.label);
+        if (label === null) return;
+        const trimmed = label.trim();
+        if (!trimmed) {
+            setStatus("Class label cannot be blank.", true);
+            return;
+        }
+        const layers = currentClassLayersPayload().map((layer) => (
+            layer.id === activeLayer
+                ? { ...layer, label: trimmed, class_name: classNameFromLabel(trimmed, layer.id) }
+                : layer
+        ));
+        setClassLayers(layers, { preserveMasks: true });
+        await saveClassLayersToDataset(`Renamed class label to '${trimmed}'.`);
+        setActiveLayer(activeLayer);
+    }
+
+    async function deleteClassLayer() {
+        if (!currentDatasetId || !activeLayer) {
+            setStatus("Select a dataset and class label first.", true);
+            return;
+        }
+        if (classLayers.length <= 1) {
+            setStatus("A model needs at least one class label.", true);
+            return;
+        }
+        const existing = classLayers.find((layer) => layer.id === activeLayer);
+        if (!existing) return;
+        const painted = layerHasPaint(activeLayer);
+        const message = painted
+            ? `Delete '${existing.label}' and discard its painted masks in this dataset?`
+            : `Delete '${existing.label}' from this dataset?`;
+        if (!window.confirm(message)) return;
+        const nextActive = classLayers.find((layer) => layer.id !== activeLayer)?.id || null;
+        const layers = currentClassLayersPayload().filter((layer) => layer.id !== activeLayer);
+        delete layerCanvas[activeLayer];
+        setClassLayers(layers, { preserveMasks: true });
+        activeLayer = nextActive || classLayers[0]?.id || "whole";
+        await saveClassLayersToDataset(`Deleted class label '${existing.label}'.`);
+        setActiveLayer(activeLayer);
+    }
+
+    async function maybeAdoptSelectedModelSchema() {
+        const expertLayers = selectedExpertLayers();
+        if (!expertLayers || !expertLayers.length) return;
+        if (!currentDatasetId) {
+            setClassLayers(expertLayers, { preserveMasks: false });
+            return;
+        }
+        const datasetLayers = currentDatasetSummary()?.class_layers || classLayers;
+        if (!layersDiffer(datasetLayers, expertLayers)) return;
+        const ok = window.confirm("The selected model uses a different class label list. Apply that label list to this dataset?");
+        if (!ok) return;
+        setClassLayers(expertLayers, { preserveMasks: true });
+        await saveClassLayersToDataset("Dataset labels updated to match the selected model.");
+    }
+
     function renderModelPlan(plan) {
         const d = dom();
         if (!d.modelPlan) return;
@@ -811,10 +1069,12 @@
             return;
         }
         const fruit = String(plan.fruit_type || currentDatasetSummary()?.fruit_type || "watermelon").replace(/_/g, " ");
+        const layers = plan.dataset_class_layers || currentDatasetSummary()?.class_layers || classLayers;
+        const labelText = normalizeClassLayers(layers).map((layer) => layer.label).join(", ");
         if (plan.operation === "copy_then_fine_tune") {
-            d.modelPlan.innerText = `Model plan for ${fruit}: copy ${plan.base_id}, then fine-tune it as ${plan.candidate_id}.`;
+            d.modelPlan.innerText = `Model plan for ${fruit}: copy ${plan.base_id}, then fine-tune it as ${plan.candidate_id}. Labels: ${labelText}.`;
         } else {
-            d.modelPlan.innerText = `Model plan for ${fruit}: fine-tune ${plan.base_id} into candidate ${plan.candidate_id}.`;
+            d.modelPlan.innerText = `Model plan for ${fruit}: fine-tune ${plan.base_id} into candidate ${plan.candidate_id}. Labels: ${labelText}.`;
         }
     }
 
@@ -863,7 +1123,15 @@
         if (name === null) return null;
         try {
             setStatus("Creating dataset...");
-            const data = await apiPostJson("", { name, fruit_type: fruitType, source: "manual_upload" });
+            const expertLayers = selectedExpertLayers();
+            if (expertLayers?.length) setClassLayers(expertLayers, { preserveMasks: false });
+            const data = await apiPostJson("", {
+                name,
+                fruit_type: fruitType,
+                project_id: typeof window.activeFruitProjectId === "function" ? window.activeFruitProjectId() : "",
+                source: "manual_upload",
+                class_layers: currentClassLayersPayload()
+            });
             if (!data.success) throw new Error(data.message || "Create failed.");
             datasetsLoaded = false;
             await loadDatasets(data.dataset.dataset_id);
@@ -1272,6 +1540,10 @@
             imgW = baseImage.naturalWidth;
             imgH = baseImage.naturalHeight;
 
+            const maskData = await apiGetJson(`/${currentDatasetId}/images/${imageId}/masks`);
+            if (maskData?.class_layers) {
+                setClassLayers(maskData.class_layers, { preserveMasks: false });
+            }
             LAYERS.forEach((layer) => { layerCanvas[layer] = newLayerCanvas(); });
             undoStack = [];
             redoStack = [];
@@ -1281,7 +1553,6 @@
             painting = false;
             lastPt = null;
 
-            const maskData = await apiGetJson(`/${currentDatasetId}/images/${imageId}/masks`);
             if (maskData && maskData.success && maskData.layers) {
                 await Promise.all(LAYERS.map((layer) => loadMaskLayer(layer, maskData.layers[layer])));
             }
@@ -1655,6 +1926,7 @@
             formData.append("expert_id", document.getElementById("model-version-select")?.value || "");
             const data = await apiSendForm(`/${currentDatasetId}/images/${currentImageId}/prelabel`, "POST", formData);
             if (!data.success) throw new Error(data.message || "Pre-label failed.");
+            if (data.class_layers) setClassLayers(data.class_layers, { preserveMasks: false });
             LAYERS.forEach((layer) => { layerCanvas[layer] = newLayerCanvas(); });
             undoStack = [];
             redoStack = [];
@@ -1738,10 +2010,15 @@
     function renderLayerButtons() {
         const d = dom();
         if (!d.layerButtons) return;
-        d.layerButtons.innerHTML = LAYERS.map((layer) => {
-            const [r, g, b] = LAYER_COLORS[layer];
+        d.layerButtons.innerHTML = classLayers.map((entry) => {
+            const layer = entry.id;
+            const [r, g, b] = LAYER_COLORS[layer] || [120, 120, 120];
             return `<button type="button" class="studio-layer-btn ${layer === activeLayer ? "active" : ""}" data-layer="${layer}">
-                <span class="swatch" style="background: rgb(${r},${g},${b});"></span>${esc(LAYER_LABELS[layer])}
+                <span class="swatch" style="background: rgb(${r},${g},${b});"></span>
+                <span class="studio-layer-copy">
+                    <span>${esc(LAYER_LABELS[layer])}</span>
+                    <small>#${Number(entry.class_id || 0)} ${esc(entry.class_name || layer)}</small>
+                </span>
             </button>`;
         }).join("");
     }
@@ -1767,6 +2044,9 @@
         if (d.augmentExportBtn) d.augmentExportBtn.disabled = !currentDatasetId;
         if (d.finetuneBtn) d.finetuneBtn.disabled = !currentDatasetId;
         if (d.augmentPreviewBtn) d.augmentPreviewBtn.disabled = !currentDatasetId;
+        if (d.layerAddBtn) d.layerAddBtn.disabled = !currentDatasetId || classLayers.length >= MAX_CLASS_LAYERS;
+        if (d.layerRenameBtn) d.layerRenameBtn.disabled = !currentDatasetId || !activeLayer;
+        if (d.layerDeleteBtn) d.layerDeleteBtn.disabled = !currentDatasetId || classLayers.length <= 1;
         if (d.syncPanel) d.syncPanel.classList.toggle("visible", syncAllowed());
         if (d.latentPanel) d.latentPanel.classList.toggle("visible", syncAllowed());
         if (d.syncRefreshBtn) d.syncRefreshBtn.disabled = !syncAllowed();
@@ -1792,7 +2072,9 @@
             const created = await apiPostJson("", {
                 name: name || "Compatibility samples",
                 fruit_type: opts.fruitType || "watermelon",
-                source: opts.source || "compatibility_check"
+                project_id: opts.projectId || (typeof window.activeFruitProjectId === "function" ? window.activeFruitProjectId() : ""),
+                source: opts.source || "compatibility_check",
+                class_layers: opts.classLayers || selectedExpertLayers() || currentClassLayersPayload()
             });
             if (!created.success) throw new Error(created.message || "Create failed.");
             const datasetId = created.dataset.dataset_id;
@@ -1953,6 +2235,9 @@
 
         d.brushBtn?.addEventListener("click", () => setTool("brush"));
         d.eraserBtn?.addEventListener("click", () => setTool("eraser"));
+        d.layerAddBtn?.addEventListener("click", addClassLayer);
+        d.layerRenameBtn?.addEventListener("click", renameClassLayer);
+        d.layerDeleteBtn?.addEventListener("click", deleteClassLayer);
         d.layerButtons?.addEventListener("click", (e) => {
             const btn = e.target.closest(".studio-layer-btn");
             if (btn && btn.dataset.layer) setActiveLayer(btn.dataset.layer);
@@ -2039,10 +2324,15 @@
                 ensureDatasetsLoaded();
             }
         });
-        document.getElementById("model-version-select")?.addEventListener("change", () => {
+        document.getElementById("model-version-select")?.addEventListener("change", async () => {
+            await maybeAdoptSelectedModelSchema();
             if (currentDatasetId) loadTrainingTarget();
         });
+        document.getElementById("model-version-select")?.addEventListener("modelversionchange", async () => {
+            await maybeAdoptSelectedModelSchema();
+        });
 
+        setClassLayers(DEFAULT_CLASS_LAYERS, { preserveMasks: false });
         renderLayerButtons();
         renderQa(null);
         updateButtons();
@@ -2057,12 +2347,25 @@
                 if (typeof activateTab === "function") activateTab("labeling-panel");
                 ensureDatasetsLoaded();
             },
-            createDatasetFromFiles: async (name, files) => {
+            createDatasetFromFiles: async (name, files, options) => {
                 if (typeof activateTab === "function") activateTab("labeling-panel");
-                await createDatasetFromFiles(name, files);
+                await createDatasetFromFiles(name, files, options);
             },
             finetuneDataset: (opts) => startFinetune(opts),
-            currentDatasetId: () => currentDatasetId
+            currentDatasetId: () => currentDatasetId,
+            refreshForProject: async () => {
+                datasetsLoaded = false;
+                currentDatasetId = null;
+                currentImageId = null;
+                images = [];
+                if (d.datasetSelect) d.datasetSelect.innerHTML = "";
+                renderQueue();
+                renderModelPlan(null);
+                clearCanvas();
+                if (selectedStudioFruit() && document.getElementById("labeling-panel")?.classList.contains("active")) {
+                    await ensureDatasetsLoaded();
+                }
+            }
         };
         window.FruitOnboarding = {
             start: startNewFruitOnboarding

@@ -91,6 +91,25 @@
     .stored-data-spinner { width: 13px; height: 13px; border: 2px solid rgba(41, 73, 95, 0.24); border-top-color: #4b84b4; border-radius: 50%; animation: stored-data-spin 0.8s linear infinite; flex: 0 0 auto; }
     .stored-data-status.ready .stored-data-spinner, .stored-data-status.warning .stored-data-spinner { display: none; }
     @keyframes stored-data-spin { to { transform: rotate(360deg); } }
+    .project-panel { border-top: 4px solid #4b84b4; }
+    .project-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .project-panel-head h2 { margin-bottom: 4px; }
+    .project-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); gap: 12px 16px; align-items: end; margin-top: 12px; }
+    .project-field { display: grid; gap: 5px; font-weight: 700; color: #263946; }
+    .project-field select, .project-field input, .project-field textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #c8d1d8; border-radius: 5px; font-size: 14px; }
+    .project-field textarea { min-height: 68px; resize: vertical; }
+    .project-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+    .project-actions button { min-height: 36px; padding: 8px 12px; border: 1px solid #b9c3cc; border-radius: 6px; background: #eef1f4; color: #1e2a32; font-weight: 800; cursor: pointer; }
+    .project-actions button:hover:not(:disabled) { background: #e1e6eb; }
+    .project-actions button.primary { background: #0b3d91; border-color: #0b3d91; color: #fff; }
+    .project-actions button.primary:hover:not(:disabled) { background: #072f70; }
+    .project-color-chip { width: 28px; height: 28px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.18); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
+    .project-details { margin-top: 12px; padding-top: 10px; border-top: 1px solid #d8e1e8; }
+    .project-details summary { cursor: pointer; font-weight: 800; color: #27495f; }
+    .project-status { min-height: 18px; }
+    @media (max-width: 760px) {
+      .project-grid { grid-template-columns: 1fr; }
+    }
     .toolbar-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-left: auto; }
     .column-dropdown { position: relative; display: inline-flex; align-items: center; }
     .bulk-toolbar button, .settings-column-toolbar button, .analysis-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
@@ -346,7 +365,12 @@
     .studio-layer-buttons { display: grid; gap: 6px; }
     .studio-layer-btn { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid #c7d0d8; border-radius: 6px; background: #fff; color: #1e2a32; cursor: pointer; font-weight: 700; font-size: 13px; text-align: left; }
     .studio-layer-btn .swatch { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,0.2); }
+    .studio-layer-copy { min-width: 0; display: grid; gap: 1px; line-height: 1.15; }
+    .studio-layer-copy small { color: #687985; font-size: 10.5px; font-weight: 700; overflow-wrap: anywhere; }
     .studio-layer-btn.active { border-color: #1e2a32; box-shadow: inset 0 0 0 1px #1e2a32; }
+    .studio-class-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin-top: 7px; }
+    .studio-class-actions button { min-height: 30px; padding: 6px 7px; border: 1px solid #c7d0d8; border-radius: 6px; background: #eef3f7; color: #1e2a32; cursor: pointer; font-size: 12px; font-weight: 800; }
+    .studio-class-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
     .studio-tool-btn { padding: 7px 12px; border: 1px solid #c7d0d8; border-radius: 6px; background: #fff; color: #1e2a32; cursor: pointer; font-weight: 700; margin: 0 4px 6px 0; }
     .studio-tool-btn.active { background: #1e2a32; color: #fff; border-color: #1e2a32; }
     .studio-tool-group input[type="range"] { width: 100%; }
@@ -401,6 +425,52 @@
     </nav>
 
     <div class="tab-panel active" id="settings-panel" role="tabpanel" aria-labelledby="settings-tab">
+    <section id="project-card" class="card project-panel">
+      <div class="project-panel-head">
+        <div>
+          <h2>Projects</h2>
+          <p class="muted">Projects save your fruit, model version, feature columns, previews, and analysis settings so repeated runs do not need to be reconfigured. Folders are personal to your username and are only for organization.</p>
+        </div>
+        <div id="active-project-color" class="project-color-chip" title="Active project color"></div>
+      </div>
+      <div class="project-grid">
+        <label class="project-field" for="project-folder-select">Folder
+          <select id="project-folder-select"></select>
+        </label>
+        <label class="project-field" for="project-select">Project
+          <select id="project-select"></select>
+        </label>
+      </div>
+      <div class="project-actions">
+        <button type="button" id="project-new-folder-btn">New Folder</button>
+        <button type="button" id="project-edit-folder-btn">Edit Folder</button>
+        <button type="button" id="project-new-btn">New Project</button>
+        <button type="button" id="project-save-setup-btn" class="primary">Save Current Setup to Project</button>
+        <span id="project-status" class="muted project-status" role="status"></span>
+      </div>
+      <details id="project-details" class="project-details">
+        <summary>Project details</summary>
+        <div class="project-grid">
+          <label class="project-field" for="project-name-input">Project name
+            <input id="project-name-input" type="text" placeholder="Project name">
+          </label>
+          <label class="project-field" for="project-color-input">Project color
+            <input id="project-color-input" type="color" value="#4b84b4">
+          </label>
+          <label class="project-field" for="project-folder-edit-select">Project folder
+            <select id="project-folder-edit-select"></select>
+          </label>
+          <label class="project-field" for="project-description-input">Description
+            <textarea id="project-description-input" placeholder="Optional notes about this project, dataset, imaging setup, or intended analysis."></textarea>
+          </label>
+        </div>
+        <div class="project-actions">
+          <button type="button" id="project-update-btn">Update Project Details</button>
+          <button type="button" id="project-delete-btn">Delete Project</button>
+        </div>
+      </details>
+    </section>
+
     <section id="analysis-settings-card" class="card settings-panel">
       <h2>Analysis Setup</h2>
       <div id="wizard-step-indicator" class="wizard-step-indicator"></div>
@@ -901,6 +971,12 @@
           <div class="studio-tool-group">
             <span class="studio-tool-label">Class layer</span>
             <div id="studio-layer-buttons" class="studio-layer-buttons"></div>
+            <div class="studio-class-actions">
+              <button id="studio-layer-add-btn" type="button">Add</button>
+              <button id="studio-layer-rename-btn" type="button">Rename</button>
+              <button id="studio-layer-delete-btn" type="button">Delete</button>
+            </div>
+            <p class="muted" style="margin:6px 0 0;">Class labels are saved with this dataset and with any model trained from it.</p>
           </div>
           <div class="studio-tool-group">
             <span class="studio-tool-label">Tool</span>

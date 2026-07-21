@@ -25,6 +25,14 @@ let productionWarmupPromise = null;
 let productionWarmupPromiseKey = "";
 let productionWarmupLastAt = 0;
 let productionWarmupLastKey = "";
+const projectState = {
+    folders: [],
+    projects: [],
+    activeProjectId: "",
+    loading: false,
+    applyingDefaults: false
+};
+let projectAutosaveTimer = null;
 
 function makeClientId(prefix = "id") {
     if (window.crypto?.randomUUID) return `${prefix}_${window.crypto.randomUUID()}`;
@@ -45,6 +53,10 @@ function batchStageUrl() {
 
 function processJobsUrl(rest = "") {
     return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_process_jobs" : "process_jobs"}${rest}`;
+}
+
+function projectsUrl(rest = "") {
+    return `${proxyBaseUrl()}/${usesProxyApi() ? "proxy_projects" : "projects"}${rest}`;
 }
 
 function previewUrlBase() {
@@ -90,6 +102,437 @@ function setStoredDataStatus(message, state = "loading", autoHideMs = 0) {
             storedDataStatusHideTimer = null;
         }, autoHideMs);
     }
+}
+
+function activeProjectId() {
+    return projectState.activeProjectId || "";
+}
+
+window.activeFruitProjectId = activeProjectId;
+
+function activeProject() {
+    return projectState.projects.find(project => project.project_id === activeProjectId()) || null;
+}
+
+function projectLocalStorageKey() {
+    return `fp_active_project_${String(currentUsername || "").trim().toLowerCase() || "anonymous"}`;
+}
+
+function projectAuthPayload(extra = {}) {
+    return {
+        password: currentPassword,
+        username: currentUsername,
+        ...extra
+    };
+}
+
+function projectStatus(message, isError = false) {
+    const el = document.getElementById("project-status");
+    if (!el) return;
+    el.innerText = message || "";
+    el.style.color = isError ? "#c7362f" : "#5f6f7a";
+}
+
+function projectColor(value, fallback = "#4b84b4") {
+    const raw = String(value || "").trim();
+    return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : fallback;
+}
+
+function projectDefaultsPayload() {
+    const settings = getAnalysisSettingsSnapshot();
+    return {
+        settings,
+        fruit_type: settings.fruit || "",
+        expert_id: settings.expertId || "",
+        requested_columns: selectedColumnIdsForRequest(),
+        preview_types: selectedPreviewIds()
+    };
+}
+
+function projectDetailsPayload(includeDefaults = false) {
+    const folderSelect = document.getElementById("project-folder-edit-select");
+    const folderFilter = document.getElementById("project-folder-select");
+    const folderValue = folderSelect?.value ?? "";
+    const filterValue = folderFilter?.value ?? "";
+    const payload = {
+        name: document.getElementById("project-name-input")?.value?.trim() || "New project",
+        description: document.getElementById("project-description-input")?.value?.trim() || "",
+        color: projectColor(document.getElementById("project-color-input")?.value),
+        folder_id: folderValue || (filterValue && filterValue !== "__all__" ? filterValue : "")
+    };
+    return includeDefaults ? { ...payload, ...projectDefaultsPayload() } : payload;
+}
+
+function setProjectDetails(project) {
+    const chip = document.getElementById("active-project-color");
+    if (chip) chip.style.background = projectColor(project?.color, "#d8e1e8");
+    const nameInput = document.getElementById("project-name-input");
+    const descInput = document.getElementById("project-description-input");
+    const colorInput = document.getElementById("project-color-input");
+    const folderInput = document.getElementById("project-folder-edit-select");
+    if (nameInput) nameInput.value = project?.name || "";
+    if (descInput) descInput.value = project?.description || "";
+    if (colorInput) colorInput.value = projectColor(project?.color);
+    if (folderInput) folderInput.value = project?.folder_id || "";
+    document.getElementById("project-save-setup-btn")?.toggleAttribute("disabled", !project);
+    document.getElementById("project-update-btn")?.toggleAttribute("disabled", !project);
+    document.getElementById("project-delete-btn")?.toggleAttribute("disabled", !project);
+}
+
+function renderProjectControls() {
+    const folderSelect = document.getElementById("project-folder-select");
+    const folderEditSelect = document.getElementById("project-folder-edit-select");
+    const projectSelect = document.getElementById("project-select");
+    if (!folderSelect || !projectSelect) return;
+
+    const folderOptions = [
+        `<option value="__all__">All folders</option>`,
+        `<option value="">Unfiled projects</option>`,
+        ...projectState.folders.map(folder => `<option value="${escapeHtml(folder.folder_id)}">${escapeHtml(folder.name)}</option>`)
+    ];
+    const previousFolder = folderSelect.value || "__all__";
+    folderSelect.innerHTML = folderOptions.join("");
+    folderSelect.value = [...folderSelect.options].some(option => option.value === previousFolder) ? previousFolder : "__all__";
+
+    if (folderEditSelect) {
+        folderEditSelect.innerHTML = [
+            `<option value="">No folder</option>`,
+            ...projectState.folders.map(folder => `<option value="${escapeHtml(folder.folder_id)}">${escapeHtml(folder.name)}</option>`)
+        ].join("");
+    }
+
+    const filter = folderSelect.value;
+    const visibleProjects = projectState.projects.filter(project => (
+        filter === "__all__" || String(project.folder_id || "") === filter
+    ));
+    projectSelect.innerHTML = [
+        `<option value="">No active project</option>`,
+        ...visibleProjects.map(project => {
+            const folder = projectState.folders.find(item => item.folder_id === project.folder_id);
+            const folderText = folder && filter === "__all__" ? ` · ${folder.name}` : "";
+            return `<option value="${escapeHtml(project.project_id)}">${escapeHtml(project.name || project.project_id)}${escapeHtml(folderText)}</option>`;
+        })
+    ].join("");
+    if (activeProjectId() && [...projectSelect.options].some(option => option.value === activeProjectId())) {
+        projectSelect.value = activeProjectId();
+    } else if (activeProjectId() && filter !== "__all__") {
+        projectSelect.value = "";
+    }
+    setProjectDetails(activeProject());
+}
+
+function setProjectControlsDisabled(disabled) {
+    const hasProject = Boolean(activeProject());
+    [
+        "project-folder-select", "project-select", "project-new-folder-btn",
+        "project-edit-folder-btn", "project-new-btn", "project-name-input",
+        "project-description-input", "project-color-input", "project-folder-edit-select"
+    ].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = Boolean(disabled);
+    });
+    ["project-save-setup-btn", "project-update-btn", "project-delete-btn"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = Boolean(disabled || !hasProject);
+    });
+}
+
+function setFormControlValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value === undefined || value === null) return;
+    el.value = String(value);
+}
+
+function setFormCheckboxValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value === undefined || value === null) return;
+    el.checked = Boolean(value);
+    el.indeterminate = false;
+}
+
+function applyProjectDefaults(project) {
+    if (!project) {
+        try { localStorage.removeItem(projectLocalStorageKey()); } catch (_) {}
+        return;
+    }
+    projectState.applyingDefaults = true;
+    try {
+        const settings = project.settings || {};
+        if (settings.fruit) {
+            const fruitSelect = document.getElementById("fruit-select");
+            if (fruitSelect && [...fruitSelect.options].some(option => option.value === settings.fruit)) {
+                fruitSelect.value = settings.fruit;
+                rebuildModelVersionOptions(settings.fruit);
+            }
+        }
+        setFormControlValue("model-version-select", settings.expertId || project.expert_id || "");
+        setFormCheckboxValue("read-labels-input", settings.readLabels);
+        setFormCheckboxValue("read-qr-input", settings.readQr);
+        setFormCheckboxValue("use-color-checker-input", settings.useColorChecker);
+        setFormControlValue("line-options-input", settings.lineOptions || "");
+        setFormControlValue("scale-value-input", settings.scaleValue || "");
+        setFormControlValue("scale-unit-select", settings.scaleUnit || "cm_per_px");
+        const trad = settings.traditionalSettings || {};
+        setFormControlValue("trad-proximal-width-input", trad.proximal_width_percent);
+        setFormControlValue("trad-distal-width-input", trad.distal_width_percent);
+        setFormControlValue("trad-angle-span-input", trad.angle_sample_percent);
+        setFormControlValue("trad-end-band-input", trad.end_indentation_percent);
+        updateSettingsSliderLabels();
+
+        const ids = Array.isArray(project.requested_columns)
+            ? project.requested_columns.filter(id => COLUMN_BY_ID.has(id))
+            : [];
+        if (ids.length) {
+            visibleColumnIds = new Set(ids);
+            addColumnIds(visibleColumnIds, ALWAYS_DEFAULT_COLUMN_IDS);
+            applyMetricColumnUnitLabels(settings);
+        } else {
+            applyAnalysisColumnPreset({ sync: false });
+        }
+        updateColumnPickerChecks();
+        updateDependentSettingsAvailability();
+        renderColumnPicker();
+        renderColumnHelp();
+        syncVisibleOutputs();
+        if (settings.fruit && isKnownFruit(settings.fruit)) {
+            wizardCompleted = true;
+            showWizardStep(WIZARD_SUMMARY_STEP);
+        } else {
+            updateAnalysisTabAvailability();
+        }
+        try { localStorage.setItem(projectLocalStorageKey(), project.project_id); } catch (_) {}
+    } finally {
+        projectState.applyingDefaults = false;
+    }
+}
+
+async function loadProjects({ applyDefault = true } = {}) {
+    if (!currentUsername || !currentPassword) return false;
+    projectState.loading = true;
+    setProjectControlsDisabled(true);
+    projectStatus("Loading projects...");
+    try {
+        const params = new URLSearchParams({
+            username: currentUsername,
+            password: currentPassword,
+            _t: Date.now().toString()
+        });
+        const response = await fetch(`${projectsUrl()}?${params}`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+        projectState.folders = Array.isArray(data.folders) ? data.folders : [];
+        projectState.projects = Array.isArray(data.projects) ? data.projects : [];
+        const savedId = (() => { try { return localStorage.getItem(projectLocalStorageKey()) || ""; } catch (_) { return ""; } })();
+        const target = projectState.projects.find(project => project.project_id === projectState.activeProjectId)
+            || projectState.projects.find(project => project.project_id === savedId)
+            || projectState.projects[0]
+            || null;
+        projectState.activeProjectId = target?.project_id || "";
+        renderProjectControls();
+        setProjectDetails(target);
+        if (target && applyDefault) applyProjectDefaults(target);
+        projectStatus(target ? `Active project: ${target.name}` : "No project selected. Create one to save setup defaults.");
+        return true;
+    } catch (err) {
+        projectStatus(`Could not load projects: ${err.message}`, true);
+        projectState.folders = [];
+        projectState.projects = [];
+        renderProjectControls();
+        return false;
+    } finally {
+        projectState.loading = false;
+        setProjectControlsDisabled(isAnalysisSettingsLocked());
+    }
+}
+
+function replaceProject(updatedProject) {
+    if (!updatedProject?.project_id) return;
+    const idx = projectState.projects.findIndex(project => project.project_id === updatedProject.project_id);
+    if (idx >= 0) projectState.projects[idx] = updatedProject;
+    else projectState.projects.unshift(updatedProject);
+    projectState.activeProjectId = updatedProject.project_id;
+    renderProjectControls();
+    setProjectDetails(updatedProject);
+}
+
+async function saveActiveProjectDefaults({ quiet = false } = {}) {
+    const project = activeProject();
+    if (!project || projectState.applyingDefaults || isAnalysisSettingsLocked()) return false;
+    try {
+        if (!quiet) projectStatus("Saving current setup to project...");
+        const response = await fetch(projectsUrl(`/${encodeURIComponent(project.project_id)}`), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(projectAuthPayload(projectDetailsPayload(true)))
+        });
+        const data = await response.json();
+        if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+        replaceProject(data.project);
+        if (!quiet) projectStatus("Project setup saved.");
+        return true;
+    } catch (err) {
+        projectStatus(`Project save failed: ${err.message}`, true);
+        return false;
+    }
+}
+
+function scheduleProjectDefaultsAutosave() {
+    if (!activeProject() || projectState.applyingDefaults || isAnalysisSettingsLocked()) return;
+    if (projectAutosaveTimer) clearTimeout(projectAutosaveTimer);
+    projectAutosaveTimer = setTimeout(() => {
+        projectAutosaveTimer = null;
+        saveActiveProjectDefaults({ quiet: true });
+    }, 650);
+}
+
+async function createProjectFromCurrentSetup() {
+    const defaultName = selectedFruit()
+        ? `${selectedFruit().replace(/_/g, " ").replace(/\b\w/g, ch => ch.toUpperCase())} project`
+        : "New project";
+    const name = window.prompt("Project name:", document.getElementById("project-name-input")?.value || defaultName);
+    if (name === null) return;
+    try {
+        projectStatus("Creating project...");
+        const response = await fetch(projectsUrl(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(projectAuthPayload({ ...projectDetailsPayload(true), name: name.trim() || defaultName }))
+        });
+        const data = await response.json();
+        if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+        replaceProject(data.project);
+        applyProjectDefaults(data.project);
+        projectStatus("Project created and current setup saved.");
+        await refreshSavedJobSelector().catch(() => {});
+    } catch (err) {
+        projectStatus(`Could not create project: ${err.message}`, true);
+    }
+}
+
+async function createProjectFolder() {
+    const name = window.prompt("Folder name:", "New folder");
+    if (name === null) return;
+    const description = window.prompt("Folder description (optional):", "") || "";
+    const color = window.prompt("Folder color as hex (optional):", "#6f7f8d") || "#6f7f8d";
+    try {
+        projectStatus("Creating folder...");
+        const response = await fetch(projectsUrl("/folders"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(projectAuthPayload({ name, description, color: projectColor(color, "#6f7f8d") }))
+        });
+        const data = await response.json();
+        if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+        projectState.folders.push(data.folder);
+        renderProjectControls();
+        document.getElementById("project-folder-select").value = data.folder.folder_id;
+        document.getElementById("project-folder-edit-select").value = data.folder.folder_id;
+        projectStatus("Folder created.");
+    } catch (err) {
+        projectStatus(`Could not create folder: ${err.message}`, true);
+    }
+}
+
+async function editProjectFolder() {
+    const folderId = document.getElementById("project-folder-select")?.value || "";
+    const folder = projectState.folders.find(item => item.folder_id === folderId);
+    if (!folder) {
+        projectStatus("Choose a folder to edit.", true);
+        return;
+    }
+    const name = window.prompt("Folder name:", folder.name || "");
+    if (name === null) return;
+    const description = window.prompt("Folder description:", folder.description || "") || "";
+    const color = window.prompt("Folder color as hex:", folder.color || "#6f7f8d") || folder.color || "#6f7f8d";
+    try {
+        const response = await fetch(projectsUrl(`/folders/${encodeURIComponent(folder.folder_id)}`), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(projectAuthPayload({ name, description, color: projectColor(color, "#6f7f8d") }))
+        });
+        const data = await response.json();
+        if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+        const idx = projectState.folders.findIndex(item => item.folder_id === folder.folder_id);
+        if (idx >= 0) projectState.folders[idx] = data.folder;
+        renderProjectControls();
+        document.getElementById("project-folder-select").value = data.folder.folder_id;
+        projectStatus("Folder updated.");
+    } catch (err) {
+        projectStatus(`Folder update failed: ${err.message}`, true);
+    }
+}
+
+async function updateActiveProjectDetails() {
+    const project = activeProject();
+    if (!project) {
+        projectStatus("Choose a project first.", true);
+        return;
+    }
+    try {
+        projectStatus("Updating project details...");
+        const response = await fetch(projectsUrl(`/${encodeURIComponent(project.project_id)}`), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(projectAuthPayload(projectDetailsPayload(false)))
+        });
+        const data = await response.json();
+        if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+        replaceProject({ ...project, ...data.project });
+        projectStatus("Project details updated.");
+    } catch (err) {
+        projectStatus(`Project update failed: ${err.message}`, true);
+    }
+}
+
+async function deleteActiveProject() {
+    const project = activeProject();
+    if (!project) return;
+    if (!window.confirm(`Delete project "${project.name}"? Datasets and processing jobs will stay stored, but the project organization will be removed.`)) return;
+    if (!window.confirm("Please confirm one more time. This only deletes the project record, not your datasets or runs.")) return;
+    try {
+        const response = await fetch(projectsUrl(`/${encodeURIComponent(project.project_id)}`), {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(projectAuthPayload())
+        });
+        const data = await response.json();
+        if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+        projectState.projects = projectState.projects.filter(item => item.project_id !== project.project_id);
+        projectState.activeProjectId = "";
+        renderProjectControls();
+        setProjectDetails(null);
+        try { localStorage.removeItem(projectLocalStorageKey()); } catch (_) {}
+        projectStatus("Project deleted. Existing datasets and runs were kept.");
+        await refreshSavedJobSelector().catch(() => {});
+    } catch (err) {
+        projectStatus(`Project delete failed: ${err.message}`, true);
+    }
+}
+
+function setupProjectControls() {
+    document.getElementById("project-folder-select")?.addEventListener("change", renderProjectControls);
+    document.getElementById("project-select")?.addEventListener("change", async (event) => {
+        projectState.activeProjectId = event.target.value || "";
+        const project = activeProject();
+        setProjectDetails(project);
+        if (project) applyProjectDefaults(project);
+        else {
+            try { localStorage.removeItem(projectLocalStorageKey()); } catch (_) {}
+            projectStatus("No project selected.");
+        }
+        await refreshSavedJobSelector().catch(() => {});
+        if (window.LabelingStudio?.refreshForProject) {
+            await window.LabelingStudio.refreshForProject().catch(() => {});
+        }
+    });
+    document.getElementById("project-new-folder-btn")?.addEventListener("click", createProjectFolder);
+    document.getElementById("project-edit-folder-btn")?.addEventListener("click", editProjectFolder);
+    document.getElementById("project-new-btn")?.addEventListener("click", createProjectFromCurrentSetup);
+    document.getElementById("project-save-setup-btn")?.addEventListener("click", () => saveActiveProjectDefaults());
+    document.getElementById("project-update-btn")?.addEventListener("click", updateActiveProjectDetails);
+    document.getElementById("project-delete-btn")?.addEventListener("click", deleteActiveProject);
+    renderProjectControls();
+    setProjectDetails(null);
 }
 
 function safeClientToken(value) {
@@ -493,12 +936,14 @@ async function enterApp() {
     updateDevQueueToolsVisibility();
     startQueuePolling();
     startProductionWarmupPolling();
-    setStoredDataStatus("Loading saved data: fruit models, model versions, and processing batches...");
+    setStoredDataStatus("Loading saved data: projects, fruit models, model versions, and processing batches...");
     const expertsLoaded = await loadExperts();
+    setStoredDataStatus("Loading saved projects and analysis defaults...");
+    const projectsLoaded = await loadProjects({ applyDefault: true });
     setStoredDataStatus("Loading saved processing batches...");
     const jobsLoaded = await restoreLatestPersistentJob();
-    if (expertsLoaded && jobsLoaded) {
-        setStoredDataStatus("Saved models, model versions, and processing batches loaded.", "ready", 3500);
+    if (expertsLoaded && projectsLoaded && jobsLoaded) {
+        setStoredDataStatus("Saved projects, models, model versions, and processing batches loaded.", "ready", 3500);
     } else {
         setStoredDataStatus("Some saved data could not be loaded. Refresh or try again if something looks missing.", "warning", 6000);
     }
@@ -724,9 +1169,20 @@ function rebuildModelVersionOptions(fruitType = selectedFruit()) {
     }).join("");
     const defaultExpert = versions.find(expert => expert.is_default) || versions[0];
     if (defaultExpert) select.value = defaultExpert.id;
+    select.dispatchEvent(new CustomEvent("modelversionchange", { bubbles: true }));
 }
 
 window.refreshExperts = function () { return loadExperts(); };
+window.availableFruitExperts = function () { return knownExperts.slice(); };
+window.selectedExpertClassLayers = function () {
+    const selected = document.getElementById("model-version-select")?.value || "";
+    const expert = knownExperts.find(e => String(e.id || "") === selected);
+    return Array.isArray(expert?.class_layers) ? expert.class_layers : null;
+};
+window.expertClassLayersById = function (expertId) {
+    const expert = knownExperts.find(e => String(e.id || "") === String(expertId || ""));
+    return Array.isArray(expert?.class_layers) ? expert.class_layers : null;
+};
 
 async function loadExperts() {
     const fruitSelect = document.getElementById("fruit-select");
@@ -779,6 +1235,7 @@ function requireWalkthroughComplete(statusEl) {
 
 function getAnalysisSettingsSnapshot() {
     return {
+        projectId: activeProjectId(),
         fruit: selectedFruit(),
         expertId: document.getElementById("model-version-select")?.value || "",
         readLabels: checkboxChecked("read-labels-input", false),
@@ -798,6 +1255,7 @@ function getAnalysisSettingsSnapshot() {
 
 function appendAnalysisSettings(formData, settings) {
     const snapshot = settings || getAnalysisSettingsSnapshot();
+    formData.append("project_id", snapshot.projectId || "");
     formData.append("fruit_type", snapshot.fruit || "");
     formData.append("expert_id", snapshot.expertId || "");
     formData.append("read_labels", snapshot.readLabels ? "true" : "false");
@@ -922,6 +1380,7 @@ function setupAnalysisSettingsControls() {
             const allFeatures = document.getElementById("mode-all-features-input");
             if (allFeatures) allFeatures.checked = false;
             applyAnalysisColumnPreset();
+            scheduleProjectDefaultsAutosave();
         });
     });
     ["scale-value-input", "scale-unit-select"].forEach(id => {
@@ -930,12 +1389,14 @@ function setupAnalysisSettingsControls() {
             renderColumnPicker();
             renderColumnHelp();
             syncVisibleOutputs();
+            scheduleProjectDefaultsAutosave();
         });
         document.getElementById(id)?.addEventListener("change", () => {
             applyMetricColumnUnitLabels();
             renderColumnPicker();
             renderColumnHelp();
             syncVisibleOutputs();
+            scheduleProjectDefaultsAutosave();
         });
     });
     ["mode-standard-input", "mode-smoothing-input", "mode-legacy-ta-input", "mode-visual-comparison-input", "mode-all-features-input"].forEach(id => {
@@ -950,6 +1411,7 @@ function setupAnalysisSettingsControls() {
                 if (allFeatures) allFeatures.checked = false;
             }
             applyAnalysisColumnPreset();
+            scheduleProjectDefaultsAutosave();
         });
     });
     document.getElementById("fruit-select")?.addEventListener("change", (event) => {
@@ -967,6 +1429,11 @@ function setupAnalysisSettingsControls() {
         const invalid = !isKnownFruit(value);
         event.target.classList.toggle("input-error", invalid);
         document.getElementById("fruit-select-status")?.classList.toggle("visible", invalid);
+        scheduleProjectDefaultsAutosave();
+    });
+    ["model-version-select", "line-options-input", "trad-proximal-width-input", "trad-distal-width-input", "trad-angle-span-input", "trad-end-band-input"].forEach(id => {
+        document.getElementById(id)?.addEventListener("change", scheduleProjectDefaultsAutosave);
+        document.getElementById(id)?.addEventListener("input", scheduleProjectDefaultsAutosave);
     });
 }
 
@@ -1082,6 +1549,7 @@ function showWizardStep(step, { fromEdit = false } = {}) {
     if (wizardStep === WIZARD_SUMMARY_STEP) {
         wizardCompleted = true;
         renderWizardSummary();
+        scheduleProjectDefaultsAutosave();
     }
     renderWizardIndicator();
     updateWizardNav();
@@ -2485,6 +2953,7 @@ function setupColumnControls() {
         updateDependentSettingsAvailability();
         refreshWizardForSettings();
         syncVisibleOutputs();
+        scheduleProjectDefaultsAutosave();
     };
 
     ["main-column-menu", "column-menu"].forEach(menuId => {
@@ -2762,6 +3231,7 @@ let histogramCharts = [];
 
 setupColumnControls();
 setupAnalysisSettingsControls();
+setupProjectControls();
 initSettingsWizard();
 setupCompatibilityCheck();
 setupBatchJumpControls();
@@ -3005,6 +3475,7 @@ async function createPersistentBatchJob(files, settings) {
             password: currentPassword,
             username: currentUsername,
             filenames: fileList.map(file => file.name),
+            project_id: settings?.projectId || activeProjectId(),
             settings,
             requested_columns: selectedColumnIdsForRequest(),
             preview_types: selectedPreviewIds()
@@ -3066,6 +3537,7 @@ async function createPersistentSingleJob(file, settings, previewIds, signal = nu
     form.append("settings_json", JSON.stringify(singleSettings));
     form.append("requested_columns", JSON.stringify(selectedColumnIdsForRequest()));
     form.append("preview_types", JSON.stringify(previewIds || []));
+    form.append("project_id", singleSettings.projectId || activeProjectId());
     form.append("files", file);
 
     const response = await fetch(processJobsUrl(), {
@@ -3133,9 +3605,13 @@ async function refreshSavedJobSelector(selectedJobId = "") {
     try {
         const response = await fetch(`${processJobsUrl()}?${params}`, { cache: "no-store" });
         const data = await response.json();
-        const jobs = data.success && Array.isArray(data.jobs)
+        const allJobs = data.success && Array.isArray(data.jobs)
             ? data.jobs.filter(job => (job.settings || {}).job_kind !== "single")
             : [];
+        const projectId = activeProjectId();
+        const jobs = projectId
+            ? allJobs.filter(job => job.project_id === projectId || (job.settings || {}).projectId === projectId || (job.settings || {}).project_id === projectId)
+            : allJobs;
         if (select) {
             select.innerHTML = jobs.length
                 ? jobs.map(job => {
@@ -3350,6 +3826,7 @@ function updateAnalysisSettingsLock() {
     if (fruitSelect) fruitSelect.disabled = locked;
     if (card) card.classList.toggle("settings-locked", locked);
     document.querySelectorAll(".wizard-edit-btn").forEach(btn => { btn.disabled = locked; });
+    setProjectControlsDisabled(locked);
     updateWizardNav();
     updateDependentSettingsAvailability();
 }
