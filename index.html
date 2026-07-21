@@ -40,10 +40,10 @@
     #bulk-table { overflow-anchor: none; }
     #download-csv-btn { display: none; font-weight: bold; cursor: pointer; background: #0b3d91; color: white; border: none; border-radius: 5px; }
     #download-csv-btn:hover { background: #072f70; }
-    #stop-batch-btn, #resume-batch-btn, #stop-single-btn { display: none; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; }
-    #stop-batch-btn, #stop-single-btn { background: #c7362f; }
-    #stop-batch-btn:hover, #stop-single-btn:hover { background: #a82c27; }
-    #stop-batch-btn.confirming-stop, #stop-single-btn.confirming-stop { background: #8f241f; }
+    #stop-batch-btn, #resume-batch-btn { display: none; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; }
+    #stop-batch-btn { background: #c7362f; }
+    #stop-batch-btn:hover { background: #a82c27; }
+    #stop-batch-btn.confirming-stop { background: #8f241f; }
     #resume-batch-btn { background: #5f6f7a; }
     #resume-batch-btn:hover { background: #4d5b64; }
     .dev-queue-tools { display: none; margin-top: 28px; padding-top: 14px; border-top: 1px solid #d8e1e8; text-align: right; }
@@ -93,10 +93,10 @@
     @keyframes stored-data-spin { to { transform: rotate(360deg); } }
     .toolbar-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-left: auto; }
     .column-dropdown { position: relative; display: inline-flex; align-items: center; }
-    .bulk-toolbar button, .single-toolbar button, .settings-column-toolbar button, .analysis-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
-    #column-menu-button, #single-column-menu-button, #main-column-menu-button { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding-right: 28px; position: relative; }
-    #column-menu-button::after, #single-column-menu-button::after, #main-column-menu-button::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #4a5963; }
-    #column-menu-button:hover, #single-column-menu-button:hover, #main-column-menu-button:hover { background: #e1e6eb; }
+    .bulk-toolbar button, .settings-column-toolbar button, .analysis-toolbar button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; line-height: 1; margin: 0; padding: 10px 15px; }
+    #column-menu-button, #main-column-menu-button { background: #eef1f4; color: #1e2a32; border: 1px solid #b9c3cc; border-radius: 6px; padding-right: 28px; position: relative; }
+    #column-menu-button::after, #main-column-menu-button::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #4a5963; }
+    #column-menu-button:hover, #main-column-menu-button:hover { background: #e1e6eb; }
     .column-menu-panel { display: none; position: absolute; z-index: 50; top: calc(100% + 6px); left: 0; width: min(520px, calc(100vw - 64px)); max-height: 520px; overflow: auto; background: white; border: 1px solid #ccd8df; border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.18); padding: 10px; text-align: left; }
     .column-menu-panel.open { display: block; }
     .column-group { border: 1px solid #e0e6eb; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
@@ -123,7 +123,7 @@
     .help-popover { display: none; position: absolute; z-index: 80; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 48px)); padding: 10px 12px; border: 1px solid #a8cce8; border-radius: 7px; background: #f4faff; color: #1f3545; box-shadow: 0 10px 28px rgba(0,0,0,0.18); font-size: 13px; font-weight: 500; line-height: 1.4; text-align: left; }
     .rich-help:hover .help-popover, .rich-help:focus .help-popover, .rich-help:focus-within .help-popover { display: block; }
     .help-popover a { color: #135f9a; font-weight: 700; }
-    .single-toolbar, .settings-column-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px; }
+    .settings-column-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px; }
     .file-form { margin-bottom: 0; }
     .progress-wrap { display: none; height: 8px; width: 100%; overflow: hidden; border-radius: 999px; background: #e7edf2; box-shadow: inset 0 0 0 1px rgba(80, 99, 112, 0.08); margin: 8px 0 12px; }
     .progress-wrap.visible { display: block; }
@@ -396,8 +396,7 @@
 
     <nav class="app-tabs" role="tablist" aria-label="Phenotyping workflow">
       <button type="button" class="tab-button active" id="settings-tab" role="tab" aria-selected="true" aria-controls="settings-panel" data-tab-target="settings-panel">Main</button>
-      <button type="button" class="tab-button" id="single-tab" role="tab" aria-selected="false" aria-controls="single-panel" data-tab-target="single-panel">Single Image Analysis</button>
-      <button type="button" class="tab-button" id="bulk-tab" role="tab" aria-selected="false" aria-controls="bulk-panel" data-tab-target="bulk-panel">Bulk Image Analysis</button>
+      <button type="button" class="tab-button" id="bulk-tab" role="tab" aria-selected="false" aria-controls="bulk-panel" data-tab-target="bulk-panel">Image Analysis</button>
       <button type="button" class="tab-button" id="labeling-tab" role="tab" aria-selected="false" aria-controls="labeling-panel" data-tab-target="labeling-panel">Labeling Studio</button>
     </nav>
 
@@ -422,7 +421,7 @@
             </label>
             <select id="model-version-select"></select>
           </div>
-          <p class="fruit-workflow-hint">This walkthrough configures your analysis step by step: select a fruit type, answer a few questions about your images, then review your setup. Once finished, move to Single Image Analysis or Bulk Image Analysis to schedule a processing job. See the Help section at the bottom of this page for explanations of each feature.</p>
+          <p class="fruit-workflow-hint">This walkthrough configures your analysis step by step: select a fruit type, answer a few questions about your images, then review your setup. Once finished, move to Image Analysis to upload one or more images for processing. See the Help section at the bottom of this page for explanations of each feature.</p>
           <p id="fruit-select-status" class="fruit-select-message">Select Fruit is required before continuing.</p>
         </div>
       </div>
@@ -574,7 +573,7 @@
 
         <div class="wizard-step" data-step="6">
           <h3 class="wizard-step-title">Analysis setup summary</h3>
-          <p class="muted">Review your setup below. Use Edit to change a step, or fine-tune the exact output columns with the Columns menu. You can now schedule jobs from the Single Image Analysis or Bulk Image Analysis tabs.</p>
+          <p class="muted">Review your setup below. Use Edit to change a step, or fine-tune the exact output columns with the Columns menu. You can now schedule jobs from the Image Analysis tab.</p>
           <div id="wizard-summary" class="wizard-summary"></div>
           <div class="settings-column-toolbar">
             <div class="column-dropdown">
@@ -625,7 +624,7 @@
               </figure>
             </div>
           </div>
-          <p class="setup-complete-message">Setup complete. Run analysis in the Single Image Analysis or Bulk Image Analysis tabs.</p>
+          <p class="setup-complete-message">Setup complete. Run analysis in the Image Analysis tab by uploading one or more images.</p>
         </div>
       </fieldset>
 
@@ -642,40 +641,13 @@
     </section>
     </div>
     
-    <div class="tab-panel" id="single-panel" role="tabpanel" aria-labelledby="single-tab">
-    <section class="card">
-      <h2>Single Image Analysis</h2>
-      <form id="single-form" class="file-form">
-        <input type="file" id="single-file" accept=".jpg,.jpeg,.png" required>
-      </form>
-      <p class="muted supported-file-note">Supported file types: JPG, JPEG, and PNG.</p>
-      <div class="analysis-toolbar single-toolbar">
-        <div class="column-dropdown">
-          <button type="button" id="single-column-menu-button" aria-expanded="false">Show/Hide Columns</button>
-          <div id="single-column-menu-panel" class="column-menu-panel">
-            <div id="single-column-menu"></div>
-          </div>
-        </div>
-        <div class="toolbar-actions">
-          <button type="submit" id="process-single-btn" form="single-form">Process Single</button>
-          <button type="button" id="stop-single-btn">Stop</button>
-        </div>
-      </div>
-      <div id="single-status" class="status"></div>
-      <div id="single-progress" class="progress-wrap" aria-hidden="true">
-        <div class="progress-bar indeterminate"></div>
-      </div>
-      <div id="single-result" class="result-grid"></div>
-    </section>
-    </div>
-
     <div class="tab-panel" id="bulk-panel" role="tabpanel" aria-labelledby="bulk-tab">
     <section id="bulk-section" class="card">
-      <h2>Bulk Image Analysis</h2>
+      <h2>Image Analysis</h2>
       <form id="bulk-form" class="file-form">
         <input type="file" id="bulk-files" multiple accept=".jpg,.jpeg,.png" required>
       </form>
-      <p class="muted supported-file-note">Supported file types: JPG, JPEG, and PNG.</p>
+      <p class="muted supported-file-note">Upload one or more images. Supported file types: JPG, JPEG, and PNG.</p>
       <div class="saved-job-row">
         <label for="saved-job-select">Saved processing job</label>
         <select id="saved-job-select">
@@ -692,9 +664,9 @@
           </div>
         </div>
         <div class="toolbar-actions">
-          <button type="submit" id="process-batch-btn" form="bulk-form">Process Batch</button>
-          <button type="button" id="stop-batch-btn">Stop Batch</button>
-          <button type="button" id="resume-batch-btn">Resume Batch</button>
+          <button type="submit" id="process-batch-btn" form="bulk-form">Process Images</button>
+          <button type="button" id="stop-batch-btn">Stop Processing</button>
+          <button type="button" id="resume-batch-btn">Resume Processing</button>
           <button type="button" id="download-csv-btn">Download CSV</button>
         </div>
       </div>
@@ -965,7 +937,7 @@
       <button type="button" id="lightbox-zoom-reset" aria-label="Reset zoom">100%</button>
       <button type="button" id="lightbox-zoom-in" aria-label="Zoom in">+</button>
     </div>
-    <a id="lightbox-save-preview" class="lightbox-save-preview" href="#" download>Save</a>
+    <a id="lightbox-save-preview" class="lightbox-save-preview" href="#" download>Save Image</a>
     <aside id="lightbox-legend-panel" class="lightbox-legend-panel" aria-label="Preview legend">
       <div id="lightbox-legend-header" class="lightbox-legend-header" title="Drag legend">
         <span class="lightbox-legend-drag-cue" aria-hidden="true">⋮⋮</span>

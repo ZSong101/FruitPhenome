@@ -120,7 +120,7 @@ function setLastUpdatedStamp() {
 }
 
 function activateTab(targetId) {
-    const analysisTarget = targetId === "single-panel" || targetId === "bulk-panel";
+    const analysisTarget = targetId === "bulk-panel";
     const labelingTarget = targetId === "labeling-panel";
     if (analysisTarget && !wizardCompleted) {
         targetId = "settings-panel";
@@ -989,7 +989,7 @@ let analysisTabsClicked = false;
 
 function updateAnalysisTabAvailability() {
     const ready = Boolean(wizardCompleted);
-    ["single-tab", "bulk-tab"].forEach(id => {
+    ["bulk-tab"].forEach(id => {
         const button = document.getElementById(id);
         if (!button) return;
         button.classList.toggle("setup-locked", !ready);
@@ -2034,7 +2034,6 @@ function setupColumnDragAndDrop() {
     const containers = [
         document.getElementById("main-column-menu"),
         document.getElementById("column-menu"),
-        document.getElementById("single-column-menu"),
         document.querySelector("#bulk-table thead")
     ].filter(Boolean);
 
@@ -2153,8 +2152,7 @@ function renderColumnPicker() {
     applyMetricColumnUnitLabels();
     const menus = [
         document.getElementById("main-column-menu"),
-        document.getElementById("column-menu"),
-        document.getElementById("single-column-menu")
+        document.getElementById("column-menu")
     ].filter(Boolean);
     if (!menus.length) return;
 
@@ -2444,8 +2442,7 @@ function setupColumnControls() {
 
     [
         ["main-column-menu-button", "main-column-menu-panel"],
-        ["column-menu-button", "column-menu-panel"],
-        ["single-column-menu-button", "single-column-menu-panel"]
+        ["column-menu-button", "column-menu-panel"]
     ].forEach(([buttonId, panelId]) => {
         const button = document.getElementById(buttonId);
         const panel = document.getElementById(panelId);
@@ -2490,7 +2487,7 @@ function setupColumnControls() {
         syncVisibleOutputs();
     };
 
-    ["main-column-menu", "column-menu", "single-column-menu"].forEach(menuId => {
+    ["main-column-menu", "column-menu"].forEach(menuId => {
         const menu = document.getElementById(menuId);
         menu?.addEventListener("click", handleMenuClick);
         menu?.addEventListener("change", handleMenuChange);
@@ -2646,7 +2643,7 @@ async function stopActiveSingleRun() {
     }
 }
 
-document.getElementById("single-form").addEventListener("submit", async (e) => {
+document.getElementById("single-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const file = document.getElementById("single-file").files[0];
     const status = document.getElementById("single-status");

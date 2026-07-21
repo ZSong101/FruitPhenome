@@ -313,8 +313,9 @@ button:hover {
 
 .lightbox-save-preview {
   position: absolute;
-  right: 22px;
-  bottom: 22px;
+  left: 22px;
+  right: auto;
+  bottom: 72px;
   z-index: 3;
   display: none;
   min-height: 34px;
