@@ -1,0 +1,52 @@
+name: Hugging Face Space Schedule
+
+on:
+  schedule:
+    # GitHub schedules run in UTC. The Python script checks America/New_York
+    # time internally so daylight saving time does not need separate cron lines.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to run"
+        required: true
+        default: "schedule"
+        type: choice
+        options:
+          - schedule
+          - wake
+          - pause
+          - status
+
+concurrency:
+  group: hf-space-schedule
+  cancel-in-progress: false
+
+jobs:
+  manage-spaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Hugging Face Hub client
+        run: python -m pip install --upgrade huggingface_hub
+
+      - name: Pause/restart Hugging Face Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_SPACE_ADMIN_TOKEN }}
+          APP_USERNAME: ${{ secrets.APP_USERNAME }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          HF_SPACE_REPO_IDS: ${{ vars.HF_SPACE_REPO_IDS }}
+          HF_SCHEDULE_TZ: America/New_York
+          HF_PAUSE_AT: "21:00"
+          HF_WAKE_AT: "06:45"
+          HF_ACTION_WINDOW_MIN: "30"
+          HF_POST_RESTART_WAIT_S: "60"
+          HF_WARMUP_URL: ${{ vars.HF_WARMUP_URL }}
+          HF_WARMUP_FRUIT: watermelon
+        run: python scripts/manage_hf_spaces.py --action "${{ github.event.inputs.action || 'schedule' }}"
