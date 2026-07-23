@@ -385,10 +385,13 @@
             const fruit = String(item.fruit_type || "").replace(/_/g, " ") || "unknown fruit";
             const lastUsed = Number(item.last_used_hours);
             const lastUsedText = Number.isFinite(lastUsed) ? ` · ${lastUsed.toFixed(1)} h since last use` : "";
+            const expiryText = kind === "datasets" && source === "remote" && item.stale_delete_warning
+                ? ` · deletes in ${Number(item.hours_until_expiry || 0).toFixed(1)} h`
+                : "";
             const meta = kind === "datasets"
-                ? `${fruit} · ${item.owner_username || "global"} · ${item.image_count || 0} images${lastUsedText}`
+                ? `${fruit} · ${item.owner_username || "global"} · ${item.image_count || 0} images${lastUsedText}${expiryText}`
                 : `${fruit} · v${item.version || "?"} · ${item.status || "unknown"}`;
-            return `<label class="studio-sync-item">
+            return `<label class="studio-sync-item ${item.stale_delete_warning && source === "remote" ? "stale-warning" : ""}">
                 <input type="checkbox" data-sync-source="${source}" data-sync-kind="${kind}" value="${esc(id)}">
                 <span>${esc(title)}<small>${esc(id)} · ${esc(meta)}</small></span>
             </label>`;
@@ -840,18 +843,18 @@
             const data = await apiGetJson("");
             if (!data.success) throw new Error(data.message || "Could not load datasets.");
             const selected = selectedStudioFruit();
-            const activeProjectId = typeof window.activeFruitProjectId === "function" ? window.activeFruitProjectId() : "";
-            datasetSummaries = (data.datasets || []).filter((ds) => {
-                const fruitMatches = !selected || selected === "other" || String(ds.fruit_type || "watermelon").toLowerCase() === selected.toLowerCase();
-                const projectMatches = !activeProjectId || String(ds.project_id || "") === activeProjectId;
-                return fruitMatches && projectMatches;
-            });
+            datasetSummaries = (data.datasets || []).filter((ds) => (
+                !selected || selected === "other" || String(ds.fruit_type || "watermelon").toLowerCase() === selected.toLowerCase()
+            ));
             const options = [`<option value="">Select dataset...</option>`];
             datasetSummaries.forEach((ds) => {
                 const fruit = String(ds.fruit_type || "watermelon").replace(/_/g, " ");
                 const lastUsed = Number(ds.last_used_hours);
                 const lastUsedText = Number.isFinite(lastUsed) ? ` · ${lastUsed.toFixed(1)} h since last use` : "";
-                options.push(`<option value="${esc(ds.dataset_id)}">${esc(ds.name)} · ${esc(fruit)} (${ds.image_count} img)${esc(lastUsedText)}</option>`);
+                const expiryText = ds.stale_delete_warning
+                    ? ` · deletes in ${Number(ds.hours_until_expiry || 0).toFixed(1)} h`
+                    : "";
+                options.push(`<option value="${esc(ds.dataset_id)}">${esc(ds.name)} · ${esc(fruit)} (${ds.image_count} img)${esc(lastUsedText)}${esc(expiryText)}</option>`);
             });
             options.push(`<option value="__new__">+ Create new dataset...</option>`);
             d.datasetSelect.innerHTML = options.join("");
@@ -1128,7 +1131,6 @@
             const data = await apiPostJson("", {
                 name,
                 fruit_type: fruitType,
-                project_id: typeof window.activeFruitProjectId === "function" ? window.activeFruitProjectId() : "",
                 source: "manual_upload",
                 class_layers: currentClassLayersPayload()
             });
@@ -2072,7 +2074,6 @@
             const created = await apiPostJson("", {
                 name: name || "Compatibility samples",
                 fruit_type: opts.fruitType || "watermelon",
-                project_id: opts.projectId || (typeof window.activeFruitProjectId === "function" ? window.activeFruitProjectId() : ""),
                 source: opts.source || "compatibility_check",
                 class_layers: opts.classLayers || selectedExpertLayers() || currentClassLayersPayload()
             });
@@ -2352,20 +2353,7 @@
                 await createDatasetFromFiles(name, files, options);
             },
             finetuneDataset: (opts) => startFinetune(opts),
-            currentDatasetId: () => currentDatasetId,
-            refreshForProject: async () => {
-                datasetsLoaded = false;
-                currentDatasetId = null;
-                currentImageId = null;
-                images = [];
-                if (d.datasetSelect) d.datasetSelect.innerHTML = "";
-                renderQueue();
-                renderModelPlan(null);
-                clearCanvas();
-                if (selectedStudioFruit() && document.getElementById("labeling-panel")?.classList.contains("active")) {
-                    await ensureDatasetsLoaded();
-                }
-            }
+            currentDatasetId: () => currentDatasetId
         };
         window.FruitOnboarding = {
             start: startNewFruitOnboarding
