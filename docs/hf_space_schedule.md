@@ -11,8 +11,8 @@ Workflow:
   - `PPAL-SongLab-UGA/fruit-analyzer`
   - `PPAL-SongLab-UGA/watermelon-proxy`
 - Default schedule:
-  - Pause window starts at `8:00 PM America/New_York`
-  - Wake window starts at `6:45 AM America/New_York`
+  - Keep Spaces awake from `6:45 AM America/New_York` through `9:00 PM America/New_York`
+  - Keep Spaces paused from `9:00 PM America/New_York` through `6:45 AM America/New_York`
 
 ## Required GitHub Secrets
 
@@ -32,6 +32,9 @@ want to override the defaults.
 - `HF_SPACE_REPO_IDS`: comma-separated Space repo ids to manage.
 - `HF_WARMUP_URL`: warmup URL. Defaults to
   `https://ppal-songlab-uga-watermelon-proxy.hf.space/proxy_warmup`.
+- `HF_WARMUP_REQUIRED`: set to `true` only if a failed warmup request should
+  fail the workflow. By default, warmup failures are logged as warnings because
+  the Spaces may still be starting.
 
 ## Manual Controls
 
@@ -41,5 +44,5 @@ manually with:
 - `status`: print current runtime states.
 - `wake`: restart managed Spaces and call warmup.
 - `pause`: pause managed Spaces.
-- `schedule`: use the current New York time to decide whether to pause, wake, or
-  only report status.
+- `schedule`: use the current New York time to keep Spaces awake during the day
+  and paused at night.

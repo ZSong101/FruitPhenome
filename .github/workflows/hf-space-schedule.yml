@@ -45,7 +45,6 @@ jobs:
           HF_SCHEDULE_TZ: America/New_York
           HF_PAUSE_AT: "21:00"
           HF_WAKE_AT: "06:45"
-          HF_ACTION_WINDOW_MIN: "30"
           HF_POST_RESTART_WAIT_S: "60"
           HF_WARMUP_URL: ${{ vars.HF_WARMUP_URL }}
           HF_WARMUP_FRUIT: watermelon

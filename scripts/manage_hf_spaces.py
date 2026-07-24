@@ -8,8 +8,10 @@ Expected environment:
   HF_SCHEDULE_TZ        IANA timezone. Defaults to America/New_York.
   HF_PAUSE_AT           Local wall time HH:MM. Defaults to 20:00.
   HF_WAKE_AT            Local wall time HH:MM. Defaults to 06:45.
-  HF_ACTION_WINDOW_MIN  Minutes after each wall time when schedule mode acts.
+  HF_ACTION_WINDOW_MIN  Legacy compatibility only; schedule mode now ensures
+                        daytime awake and nighttime paused.
   HF_WARMUP_URL         Optional POST URL to warm after wake/restart.
+  HF_WARMUP_REQUIRED    Set to 1/true if warmup failure should fail the workflow.
   APP_USERNAME          Optional app username for warmup payload.
   APP_PASSWORD          Optional app password for warmup payload.
 """
@@ -126,7 +128,10 @@ def post_warmup(retries: int = 6, delay_s: int = 20) -> None:
             print(f"[warmup] attempt {attempt}/{retries} failed: {type(exc).__name__}: {exc}")
             if attempt < retries:
                 time.sleep(delay_s)
-    raise RuntimeError("Warmup failed after all retries.")
+    message = "Warmup failed after all retries."
+    if os.getenv("HF_WARMUP_REQUIRED", "").strip().lower() in {"1", "true", "yes"}:
+        raise RuntimeError(message)
+    print(f"[warmup] warning: {message}")
 
 
 def scheduled_action() -> str:
@@ -134,14 +139,15 @@ def scheduled_action() -> str:
     now_local = datetime.now(tz)
     pause_at = parse_hhmm(os.getenv("HF_PAUSE_AT", "20:00"))
     wake_at = parse_hhmm(os.getenv("HF_WAKE_AT", "06:45"))
-    window_min = int(os.getenv("HF_ACTION_WINDOW_MIN", "30"))
 
     print(f"[schedule] local time={now_local.isoformat(timespec='seconds')}")
-    if in_window(now_local, pause_at, window_min):
-        return "pause"
-    if in_window(now_local, wake_at, window_min):
-        return "wake"
-    return "status"
+    now_min = minutes_since_midnight(now_local.time())
+    pause_min = minutes_since_midnight(pause_at)
+    wake_min = minutes_since_midnight(wake_at)
+
+    if wake_min <= pause_min:
+        return "wake" if wake_min <= now_min < pause_min else "pause"
+    return "pause" if pause_min <= now_min < wake_min else "wake"
 
 
 def main() -> int:
