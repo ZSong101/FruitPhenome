@@ -3132,6 +3132,72 @@ function setSavedJobDropdownAttention(active) {
     if (row) row.classList.toggle("saved-job-attention", Boolean(active));
 }
 
+function setCheckboxValue(id, checked) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.checked = Boolean(checked);
+    input.indeterminate = false;
+}
+
+function setFieldValue(id, value) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.value = value ?? "";
+}
+
+function applySavedAnalysisSetup(job) {
+    const settings = job?.settings || {};
+    if (!settings || Object.keys(settings).length === 0) return;
+
+    const fruitSelect = document.getElementById("fruit-select");
+    if (fruitSelect && settings.fruit && [...fruitSelect.options].some(option => option.value === settings.fruit)) {
+        fruitSelect.value = settings.fruit;
+        rebuildModelVersionOptions(settings.fruit);
+        const versionSelect = document.getElementById("model-version-select");
+        if (versionSelect && settings.expertId && [...versionSelect.options].some(option => option.value === settings.expertId)) {
+            versionSelect.value = settings.expertId;
+        }
+    }
+
+    setCheckboxValue("read-labels-input", settings.readLabels);
+    setCheckboxValue("read-qr-input", settings.readQr);
+    setCheckboxValue("use-color-checker-input", settings.useColorChecker !== false);
+    setFieldValue("line-options-input", settings.lineOptions || "");
+    setFieldValue("scale-value-input", settings.scaleValue || "");
+    setFieldValue("scale-unit-select", settings.scaleUnit || "cm_per_px");
+
+    const trad = settings.traditionalSettings || {};
+    setFieldValue("trad-proximal-width-input", trad.proximal_width_percent ?? 10);
+    setFieldValue("trad-distal-width-input", trad.distal_width_percent ?? 10);
+    setFieldValue("trad-angle-span-input", trad.angle_sample_percent ?? 5);
+    setFieldValue("trad-end-band-input", trad.end_indentation_percent ?? 25);
+    updateSettingsSliderLabels();
+
+    const requested = Array.isArray(job?.requested_columns)
+        ? job.requested_columns.filter(id => COLUMN_BY_ID.has(id))
+        : [];
+    if (requested.length > 0) {
+        visibleColumnIds = new Set(requested);
+        ALWAYS_DEFAULT_COLUMN_IDS.forEach(id => visibleColumnIds.add(id));
+        updateColumnPickerChecks();
+        updateDependentSettingsAvailability();
+        refreshWizardForSettings();
+    } else {
+        applyAnalysisColumnPreset({ sync: false });
+    }
+
+    applyMetricColumnUnitLabels(settings);
+    renderColumnPicker();
+    renderColumnHelp();
+
+    if (settings.fruit && isKnownFruit(settings.fruit)) {
+        wizardCompleted = true;
+        showWizardStep(WIZARD_SUMMARY_STEP);
+    } else {
+        updateAnalysisTabAvailability();
+    }
+}
+
 function clearLoadedBatchView() {
     if (persistentJobPollId) {
         clearInterval(persistentJobPollId);
@@ -3215,7 +3281,8 @@ async function refreshSavedJobSelector(selectedJobId = "") {
 async function restoreLatestPersistentJob() {
     if (!currentUsername || !currentPassword) return true;
     try {
-        await refreshSavedJobSelector();
+        const jobs = await refreshSavedJobSelector();
+        if (jobs.length > 0) applySavedAnalysisSetup(jobs[0]);
         return true;
     } catch (err) {
         console.warn("Could not load saved processing history.", err);
