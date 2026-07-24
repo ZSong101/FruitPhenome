@@ -490,6 +490,8 @@ function loadSavedSession() {
 async function enterApp() {
     document.getElementById("login-view").style.display = "none";
     document.getElementById("app-view").style.display = "block";
+    savedJobDropdownInteracted = false;
+    activateTab("settings-panel");
     updateDevQueueToolsVisibility();
     startQueuePolling();
     startProductionWarmupPolling();
@@ -2088,11 +2090,7 @@ function itemCompletedStages(item) {
 }
 
 function itemHasPendingColumn(item, columnId) {
-    const stage = stageForColumnId(columnId);
-    return Boolean(
-        item?.pendingColumnIds instanceof Set && item.pendingColumnIds.has(columnId)
-        || (stage && item?.pendingStages instanceof Set && item.pendingStages.has(stage))
-    );
+    return false;
 }
 
 function columnHasUsableValue(item, columnId) {
@@ -2443,7 +2441,6 @@ function syncVisibleOutputs() {
     applyMetricColumnUnitLabels();
     refreshBatchOutputs(document.getElementById("histograms-container"));
     renderCurrentSingleAnalysis();
-    scheduleMissingStageRequest();
 }
 
 function setupColumnControls() {
@@ -2761,6 +2758,7 @@ let activeBatch = null;
 let activeSingleRun = null;
 let batchRunCounter = 0;
 let persistentJobPollId = null;
+let savedJobDropdownInteracted = false;
 const BATCH_PAUSE_MS = 50;
 const BATCH_WARMUP_COUNT = 2;
 const VIRTUAL_TABLE_THRESHOLD = 80;
@@ -3129,6 +3127,48 @@ async function waitForSinglePersistentJob(jobId, run, statusEl) {
     }
 }
 
+function setSavedJobDropdownAttention(active) {
+    const row = document.getElementById("saved-job-select")?.closest(".saved-job-row");
+    if (row) row.classList.toggle("saved-job-attention", Boolean(active));
+}
+
+function clearLoadedBatchView() {
+    if (persistentJobPollId) {
+        clearInterval(persistentJobPollId);
+        persistentJobPollId = null;
+    }
+    activeBatch = null;
+    globalBatchResults = [];
+
+    const table = document.getElementById("bulk-table");
+    if (table) {
+        table.style.display = "none";
+        table.querySelector("thead").innerHTML = "";
+        table.querySelector("tbody").innerHTML = "";
+        table.querySelector("tfoot").innerHTML = "";
+    }
+
+    const status = document.getElementById("bulk-status");
+    if (status) status.innerText = "";
+    const timer = document.getElementById("batch-timer");
+    if (timer) {
+        timer.style.display = "none";
+        timer.innerText = "";
+    }
+    const charts = document.getElementById("histograms-container");
+    if (charts) charts.innerHTML = "";
+    document.getElementById("bulk-section")?.classList.remove("bulk-card");
+    ["stop-batch-btn", "resume-batch-btn", "download-csv-btn"].forEach(id => {
+        const button = document.getElementById(id);
+        if (button) button.style.display = "none";
+    });
+    const processBtn = document.getElementById("process-batch-btn");
+    if (processBtn) processBtn.disabled = false;
+    setProgressBar("bulk-progress", 0, { visible: false });
+    updateAnalysisSettingsLock();
+    updateBatchJumpControls();
+}
+
 async function refreshSavedJobSelector(selectedJobId = "") {
     const select = document.getElementById("saved-job-select");
     if (!currentUsername || !currentPassword) return [];
@@ -3148,15 +3188,18 @@ async function refreshSavedJobSelector(selectedJobId = "") {
             ? data.jobs.filter(job => (job.settings || {}).job_kind !== "single")
             : [];
         if (select) {
-            select.innerHTML = jobs.length
-                ? jobs.map(job => {
+            const defaultOption = `<option value="">New blank batch</option>`;
+            select.innerHTML = [
+                defaultOption,
+                ...jobs.map(job => {
                     const created = job.created_at ? new Date(job.created_at).toLocaleString() : job.job_id;
                     const label = `${created} · ${job.status} · ${job.completed || 0}/${job.row_count || 0}`;
                     return `<option value="${escapeHtml(job.job_id)}">${escapeHtml(label)}</option>`;
-                }).join("")
-                : `<option value="">No saved jobs found</option>`;
-            const target = selectedJobId || activeBatch?.persistentJobId || jobs[0]?.job_id || "";
-            if (target) select.value = target;
+                })
+            ].join("");
+            const target = selectedJobId || "";
+            select.value = target && [...select.options].some(option => option.value === target) ? target : "";
+            setSavedJobDropdownAttention(jobs.length > 0 && !target && !savedJobDropdownInteracted);
         }
         return jobs;
     } catch (err) {
@@ -3172,17 +3215,10 @@ async function refreshSavedJobSelector(selectedJobId = "") {
 async function restoreLatestPersistentJob() {
     if (!currentUsername || !currentPassword) return true;
     try {
-        const jobs = await refreshSavedJobSelector();
-        const latest = jobs[0];
-        if (!latest) return true;
-        const job = await fetchPersistentJob(latest.job_id);
-        applyPersistentJob(job, { restored: true });
-        if (["queued", "running", "stopping"].includes(job.status)) {
-            startPersistentJobPolling(job.job_id);
-        }
+        await refreshSavedJobSelector();
         return true;
     } catch (err) {
-        console.warn("Could not restore persistent processing history.", err);
+        console.warn("Could not load saved processing history.", err);
         return false;
     }
 }
@@ -3754,9 +3790,7 @@ function markCurrentlyMissingColumnsPending(batch, requestedIds) {
 }
 
 function scheduleMissingStageRequest() {
-    if (!activeBatch || globalBatchResults.length === 0) return;
-    clearTimeout(missingStageTimer);
-    missingStageTimer = setTimeout(runMissingStageRequest, 150);
+    return;
 }
 
 async function runMissingStageRequest() {
@@ -4448,9 +4482,23 @@ document.getElementById("resume-batch-btn").addEventListener("click", async () =
 });
 
 document.getElementById("flush-dev-queue-btn")?.addEventListener("click", flushDevQueue);
-document.getElementById("saved-job-select")?.addEventListener("change", async (event) => {
+const savedJobSelect = document.getElementById("saved-job-select");
+savedJobSelect?.addEventListener("pointerdown", () => {
+    savedJobDropdownInteracted = true;
+    setSavedJobDropdownAttention(false);
+});
+savedJobSelect?.addEventListener("focus", () => {
+    savedJobDropdownInteracted = true;
+    setSavedJobDropdownAttention(false);
+});
+savedJobSelect?.addEventListener("change", async (event) => {
+    savedJobDropdownInteracted = true;
+    setSavedJobDropdownAttention(false);
     const jobId = event.target.value;
-    if (!jobId) return;
+    if (!jobId) {
+        clearLoadedBatchView();
+        return;
+    }
     try {
         const job = await fetchPersistentJob(jobId);
         applyPersistentJob(job, { restored: true });
