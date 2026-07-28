@@ -478,13 +478,13 @@
         </div>
 
         <div class="wizard-step" data-step="3">
-          <h3 class="wizard-step-title">Step 3: On-screen labels and QR codes</h3>
+          <h3 class="wizard-step-title">Step 3: On-screen text and QR codes</h3>
           <div class="settings-checks">
             <label class="settings-check" for="read-labels-input">
               <input type="checkbox" id="read-labels-input">
-              <span>On-screen labels
+              <span>On-screen text present
                 <span class="column-help-icon rich-help" tabindex="0">?
-                  <span class="help-popover">Check this when images contain visible Line labels that should be read into the Line columns. Please be aware that handwritten digit recognition may not be 100% accurate.</span>
+                  <span class="help-popover">Check this when images contain visible labels that should be read into the on-screen text columns. Please be aware that handwritten digit recognition may not be 100% accurate.</span>
                 </span>
               </span>
             </label>
@@ -496,15 +496,23 @@
                 </span>
               </span>
             </label>
+            <label class="settings-check" for="qr-replaces-text-input">
+              <input type="checkbox" id="qr-replaces-text-input">
+              <span>QR code replaces on-screen text
+                <span class="column-help-icon rich-help" tabindex="0">?
+                  <span class="help-popover">Check this when the QR code is meant to store the same ID as the visible text. The Read column will use QR data first, then on-screen text if QR data is unavailable.</span>
+                </span>
+              </span>
+            </label>
           </div>
           <div id="line-settings-block" class="dependent-settings">
-            <label for="line-options-input" class="setting-label">Possible Lines
+            <label for="line-options-input" class="setting-label">Possible Text Values
               <span class="column-help-icon rich-help" tabindex="0">?
-                <span class="help-popover">Optional comma-separated list of expected Line IDs. When on-screen label reading is enabled, OCR output is matched against this list so the app chooses the closest listed Line rather than a free-form read; handwritten digit recognition may still need manual review.</span>
+                <span class="help-popover">Optional comma-separated list of expected visible text values. When on-screen text reading is enabled, the app chooses the closest listed value rather than a free-form read; handwritten digit recognition may still need manual review.</span>
               </span>
             </label>
             <textarea id="line-options-input" placeholder="Example: 12-4, 12-5, 13-1. Optional."></textarea>
-            <p class="muted">Separate possible Line IDs with commas. Text recognition will search for a match within this list.</p>
+            <p class="muted">Separate possible text values with commas. The app will search for a match within this list.</p>
           </div>
         </div>
 
@@ -617,8 +625,8 @@
               </figure>
               <div class="compat-example-separator" aria-hidden="true"></div>
               <figure class="compat-example-card expected-output">
-                <img class="preview-img" src="example_image_ocr_dbnet_base64.jpg" data-full-src="example_image_ocr_dbnet_base64.jpg" alt="Example OCR preview output">
-                <figcaption><strong>OCR preview</strong>Expected output preview for detected text labels; selected label features are also returned as numeric/text columns.</figcaption>
+                <img class="preview-img" src="example_image_ocr_dbnet_base64.jpg" data-full-src="example_image_ocr_dbnet_base64.jpg" alt="Example on-screen text preview output">
+                <figcaption><strong>Text preview</strong>Expected output preview for detected visible text labels; selected text features are also returned as data columns.</figcaption>
               </figure>
               <figure class="compat-example-card expected-output adjustable-example">
                 <img class="preview-img" src="example_image_cleanup_hybrid_base64.jpg" data-full-src="example_image_cleanup_hybrid_base64.jpg" alt="Example cleanup mask preview output">
@@ -686,6 +694,8 @@
       <div id="bulk-progress" class="progress-wrap" aria-hidden="true">
         <div class="progress-bar"></div>
       </div>
+
+      <div id="single-result" class="result-grid" style="display: none;"></div>
       
       <div class="table-wrap">
         <table id="bulk-table" style="display: none;">

@@ -12,6 +12,7 @@ const STOP_CONFIRM_MS = 3500;
 const PROD_WARMUP_TIMEOUT_MS = 40000;
 const PROD_WARMUP_INTERVAL_MS = 45 * 60 * 1000;
 const PROD_WARMUP_RECENT_MS = 10 * 60 * 1000;
+const FINAL_NUMBER_DIGITS = 2;
 const TARGET_HASH = "9139eb3676d5dfafced7613f044d86d9e7c84f40a04c83ddce062878621315d0";
 const DEVTEST_TARGET_HASH = "ae1860180228042c8481b07ac784542baf6acc14cdda4b8941555e70d67932b8";
 
@@ -644,6 +645,7 @@ function shouldRequestLineOcr(previewIds = [], settings = null) {
     const explicitOcrOutputRequested = previewIds.includes("image_line_ocr_base64")
         || previewIds.includes("image_ocr_dbnet_base64")
         || previewIds.includes("image_combined_base64")
+        || (snapshot.qrReplacesText && typeof visibleColumnIds !== "undefined" && visibleColumnIds.has("read"))
         || (typeof visibleColumnIds !== "undefined" && (
             visibleColumnIds.has("line")
             || visibleColumnIds.has("line_confidence")
@@ -672,8 +674,18 @@ function isNumber(value) {
     return typeof value === "number" && Number.isFinite(value);
 }
 
-function fmt(value, digits = 1) {
-    return isNumber(value) ? value.toFixed(digits) : "N/A";
+function numericValue(value) {
+    if (isNumber(value)) return value;
+    if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+}
+
+function fmt(value, digits = FINAL_NUMBER_DIGITS) {
+    const number = numericValue(value);
+    return number !== null ? number.toFixed(FINAL_NUMBER_DIGITS) : "N/A";
 }
 
 function measurementUnit(data) {
@@ -857,6 +869,7 @@ function getAnalysisSettingsSnapshot() {
         expertId: document.getElementById("model-version-select")?.value || "",
         readLabels: checkboxChecked("read-labels-input", false),
         readQr: checkboxChecked("read-qr-input", false),
+        qrReplacesText: checkboxChecked("qr-replaces-text-input", false),
         useColorChecker: checkboxChecked("use-color-checker-input", true),
         lineOptions: document.getElementById("line-options-input")?.value || "",
         scaleValue: (document.getElementById("scale-value-input")?.value || "").trim(),
@@ -876,6 +889,7 @@ function appendAnalysisSettings(formData, settings) {
     formData.append("expert_id", snapshot.expertId || "");
     formData.append("read_labels", snapshot.readLabels ? "true" : "false");
     formData.append("read_qr", snapshot.readQr ? "true" : "false");
+    formData.append("qr_replaces_text", snapshot.qrReplacesText ? "true" : "false");
     formData.append("use_color_checker", snapshot.useColorChecker ? "true" : "false");
     formData.append("line_options", snapshot.lineOptions || "");
     formData.append("scale_value", snapshot.scaleValue || "");
@@ -991,7 +1005,7 @@ function setupAnalysisSettingsControls() {
     document.querySelectorAll("#analysis-settings-fieldset input[type='range']").forEach(input => {
         input.addEventListener("input", updateSettingsSliderLabels);
     });
-    ["read-labels-input", "read-qr-input", "use-color-checker-input"].forEach(id => {
+    ["read-labels-input", "read-qr-input", "qr-replaces-text-input", "use-color-checker-input"].forEach(id => {
         document.getElementById(id)?.addEventListener("change", () => {
             const allFeatures = document.getElementById("mode-all-features-input");
             if (allFeatures) allFeatures.checked = false;
@@ -1019,6 +1033,8 @@ function setupAnalysisSettingsControls() {
                     const input = document.getElementById(otherId);
                     if (input) input.checked = true;
                 });
+                const readInput = document.getElementById("qr-replaces-text-input");
+                if (readInput) readInput.checked = true;
             } else if (id !== "mode-all-features-input") {
                 const allFeatures = document.getElementById("mode-all-features-input");
                 if (allFeatures) allFeatures.checked = false;
@@ -1227,9 +1243,10 @@ function wizardSummaryRows() {
     const labelBits = [settings.readLabels ? "Read on-screen labels" : "No on-screen label reading"];
     if (settings.readLabels) {
         const lineCount = (settings.lineOptions || "").split(",").map(v => v.trim()).filter(Boolean).length;
-        labelBits.push(lineCount ? `${lineCount} possible Line ID${lineCount === 1 ? "" : "s"}` : "No Line ID list");
+        labelBits.push(lineCount ? `${lineCount} possible text value${lineCount === 1 ? "" : "s"}` : "No possible text list");
     }
     labelBits.push(settings.readQr ? "Read QR Data" : "No QR code reading");
+    labelBits.push(settings.qrReplacesText ? "QR code replaces on-screen text" : "No combined Read column");
 
     let featureNames = [];
     if (checkboxChecked("mode-all-features-input", false)) {
@@ -1711,7 +1728,7 @@ const COLUMN_GROUPS = [
                 id: "previews_standard",
                 label: "Standard Previews",
                 columns: [
-                    previewColumn("image_ocr_dbnet_base64", "Preview (OCR DBNet)", "image_ocr_dbnet_base64"),
+                    previewColumn("image_ocr_dbnet_base64", "Preview (Text)", "image_ocr_dbnet_base64"),
                     previewColumn("image_pre_calibration_base64", "Preview (Pre-Cal)", "image_pre_calibration_base64"),
                     previewColumn("image_raw_base64", "Preview (Raw)", "image_raw_base64")
                 ]
@@ -1732,13 +1749,14 @@ const COLUMN_GROUPS = [
         id: "run_info",
         label: "Run Info",
         columns: [
-            metricColumn("line", "Line", "line", 0, { histogram: false }),
-            metricColumn("line_confidence", "Line Confidence", "line_confidence", 2),
-            metricColumn("line_orientation", "Orientation", "line_orientation", 0, { histogram: false, get: (data) => valueOrNull(data.line_orientation) }),
+            metricColumn("read", "Read", "read", 0, { histogram: false }),
+            metricColumn("line", "On-screen Text", "line", 0, { histogram: false }),
+            metricColumn("line_confidence", "Text Confidence", "line_confidence", 2),
+            metricColumn("line_orientation", "Text Orientation", "line_orientation", 0, { histogram: false, get: (data) => valueOrNull(data.line_orientation) }),
             metricColumn("qr_data", "QR Data", "qr_data", 0, { histogram: false }),
             metricColumn("processing_ms", "Time (ms)", "processing_ms", 0, {
                 histogramOverflow: BULK_REQUEST_TIMEOUT_MS,
-                display: (value, item) => item.data?.processing_ms_timeout ? `>${BULK_REQUEST_TIMEOUT_MS}` : (isNumber(value) ? fmt(value, 0) : "N/A"),
+                display: (value, item) => item.data?.processing_ms_timeout ? `>${BULK_REQUEST_TIMEOUT_MS}` : (numericValue(value) !== null ? fmt(value) : "N/A"),
                 csvValue: (value, item) => item.data?.processing_ms_timeout ? `>${BULK_REQUEST_TIMEOUT_MS}` : value
             })
         ]
@@ -1756,9 +1774,9 @@ const GROUP_HELP_TEXT = {
     traditional_end_shape: "End-shape features (TA) describe proximal and distal tip angles, blockiness, and indentation using the user-adjustable settings in Analysis Settings.",
     traditional_fit: "Common-shape fit features (TA) compare the cleaned fruit boundary to simple geometric or named fruit-shape templates.",
     previews: "Preview columns return diagnostic images. They are excluded from histograms and CSV downloads.",
-    previews_standard: "Standard previews show OCR, calibration, and raw model outputs requested for each image.",
+    previews_standard: "Standard previews show on-screen text detection, calibration, and raw model outputs requested for each image.",
     previews_adjustable: "Adjustable feature previews are highlighted in pale purple. Open Combined, Cleanup, Smooth, or Traditional (TA) previews to repaint masks, constrain and refit smoothing curves, or visually adjust traditional measurement controls.",
-    run_info: "Run information columns describe OCR metadata, QR code data, and processing time rather than fruit morphology."
+    run_info: "Run information columns describe visible text reads, QR code data, and processing time rather than fruit morphology."
 };
 
 const GROUP_HELP_HTML = {
@@ -1823,16 +1841,17 @@ const COLUMN_HELP_TEXT = {
     trad_taperness: "Tomato Analyzer (TA) heart-shape taperness component based on average width above and below the widest point. It increases when the two ends taper differently.",
     trad_heart: "Tomato Analyzer (TA) composite heart-shape score combining widest-point position, taperness, and proximal shoulder height. Larger values indicate a more heart-like outline by this descriptor.",
     trad_rectangularity: "Tomato Analyzer (TA) ratio of maximum inscribed rectangle area to minimum enclosing rectangle area. Values closer to 1 indicate a more rectangular fruit outline.",
-    image_ocr_dbnet_base64: "Diagnostic OCR preview showing DBNet text boxes, candidate reads, confidences, and selected Line when OCR is requested. It helps diagnose Line detection errors.",
+    image_ocr_dbnet_base64: "Diagnostic text preview showing detected text boxes, candidate reads, confidences, and the selected on-screen text value. It helps diagnose visible label reading errors.",
     image_pre_calibration_base64: "Image before color calibration, with ColorChecker overlay when available. Use it to verify the detected board is the middle 24-patch Passport page shown in Analysis Settings.",
     image_raw_base64: "Raw model-output preview retained for diagnosis. It shows the original predicted masks before cleanup is used for measurement.",
-    image_combined_base64: "Purple combined preview showing the main diagnostic overlays in one place: selected OCR read, QR code, ArUco scale marker, cleaned masks, flesh midline, smoothed contours, and smoothed endpoint geometry. It intentionally excludes Traditional (TA) feature overlays.",
+    image_combined_base64: "Purple combined preview showing the main diagnostic overlays in one place: selected on-screen text read, QR code, ArUco scale marker, cleaned masks, flesh midline, smoothed contours, and smoothed endpoint geometry. It intentionally excludes Traditional (TA) feature overlays.",
     image_cleanup_hybrid_base64: "Cleanup preview showing processed masks, raw mask outlines, axes, midline, and ColorChecker overlay. Open it and choose Adjust Features to repaint the masks, recalculate the row, and save a correction for model fine-tuning.",
     image_sm_base64: "Smoothed preview showing fitted fruit and flesh curves plus endpoint angle geometry. Open it and choose Adjust Features to repaint masks or drag weighted rind/flesh curve anchors; saving refits all smoothing parameters together.",
     image_traditional_base64: "Traditional (TA) preview showing Tomato Analyzer-style overlays such as axes, widths, angles, circle, ellipse, and indentation areas. Open it and choose Adjust Features to repaint masks or drag the proximal width, distal width, angle-span, and indentation-band controls.",
-    line: "Short Line ID detected from text in the image, optionally constrained by the Possible Lines list. It may contain letters, numbers, dashes, or underscores.",
-    line_confidence: "Confidence score for the selected Line read or matched Line option. Lower values should be checked manually.",
-    line_orientation: "Image rotation inferred from the selected OCR read and used for mask generation when text is detected. A value of 0 means no rotation was applied.",
+    read: "Combined ID read used when QR code replacement is enabled. It uses QR data first, then falls back to the on-screen text read; otherwise it shows N/A.",
+    line: "Short ID detected from visible text in the image, optionally constrained by the Possible Text Values list. It may contain letters, numbers, dashes, or underscores.",
+    line_confidence: "Confidence score for the selected visible text read or matched text option. Lower values should be checked manually.",
+    line_orientation: "Image rotation inferred from the selected visible text read and used for mask generation when text is detected. A value of 0 means no rotation was applied.",
     qr_data: "Decoded QR code payload when a QR code is present in the image. QR boxes are also drawn on generated preview images.",
     processing_ms: "Cumulative backend processing time for the image in milliseconds, including any on-demand feature or preview processing added after the row first appears. Timeout rows are shown as greater than the configured timeout value."
 };
@@ -1867,6 +1886,7 @@ let latestSingleData = null;
 let latestSinglePreviewIds = [];
 
 const ALWAYS_DEFAULT_COLUMN_IDS = ["processing_ms"];
+const READ_COLUMN_IDS = ["read"];
 const OCR_COLUMN_IDS = ["line", "line_confidence", "line_orientation"];
 const QR_COLUMN_IDS = ["qr_data"];
 const RAW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_raw"));
@@ -1874,8 +1894,8 @@ const SMOOTH_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_smoothed
 const TRADITIONAL_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("traditional"));
 const COLOR_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("experimental_color"));
 const PREVIEW_STAGE_COLUMN_IDS = new Set(columnIdsForGroup("previews"));
-const OCR_STAGE_COLUMN_IDS = new Set([...OCR_COLUMN_IDS, "image_ocr_dbnet_base64", "image_line_ocr_base64", "image_combined_base64"]);
-const QR_STAGE_COLUMN_IDS = new Set([...QR_COLUMN_IDS, "image_combined_base64"]);
+const OCR_STAGE_COLUMN_IDS = new Set([...OCR_COLUMN_IDS, ...READ_COLUMN_IDS, "image_ocr_dbnet_base64", "image_line_ocr_base64", "image_combined_base64"]);
+const QR_STAGE_COLUMN_IDS = new Set([...QR_COLUMN_IDS, ...READ_COLUMN_IDS, "image_combined_base64"]);
 
 function columnIdsForGroup(groupId) {
     const group = COLUMN_GROUP_MAP.get(groupId);
@@ -1945,13 +1965,16 @@ function syncAnalysisModeCheckboxesFromColumns() {
     setCheckboxVisualState("mode-visual-comparison-input", columnSelectionState(columnIdsForGroup("previews_standard")));
     setBinaryCheckboxVisualState("read-labels-input", columnSelectionState(OCR_COLUMN_IDS).any);
     setBinaryCheckboxVisualState("read-qr-input", columnSelectionState(QR_COLUMN_IDS).any);
+    setBinaryCheckboxVisualState("qr-replaces-text-input", columnSelectionState(READ_COLUMN_IDS).any);
     setBinaryCheckboxVisualState("use-color-checker-input", columnSelectionState([...COLOR_STAGE_COLUMN_IDS]).any);
     setAllFeaturesVisualState();
 }
 
 function updateDependentSettingsAvailability() {
     const locked = isAnalysisSettingsLocked();
-    const lineEnabled = checkboxChecked("read-labels-input", false) || columnSelectionState([...OCR_STAGE_COLUMN_IDS]).any;
+    const lineEnabled = checkboxChecked("read-labels-input", false)
+        || checkboxChecked("qr-replaces-text-input", false)
+        || columnSelectionState([...OCR_STAGE_COLUMN_IDS]).any;
     const traditionalEnabled = checkboxChecked("mode-legacy-ta-input", false) || hasVisibleColumnInGroup("traditional");
 
     const lineBlock = document.getElementById("line-settings-block");
@@ -1986,6 +2009,9 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
         if (settings.readQr) {
             addColumnIds(nextVisible, QR_COLUMN_IDS);
         }
+        if (settings.qrReplacesText) {
+            addColumnIds(nextVisible, READ_COLUMN_IDS);
+        }
         if (checkboxChecked("mode-standard-input", true)) {
             addColumnIds(nextVisible, columnIdsForGroup("experimental_raw"));
         }
@@ -2010,6 +2036,10 @@ function applyAnalysisColumnPreset({ sync = true } = {}) {
 
     if (!settings.readQr && !checkboxChecked("mode-all-features-input", false)) {
         removeColumnIds(nextVisible, QR_COLUMN_IDS);
+    }
+
+    if (!settings.qrReplacesText && !checkboxChecked("mode-all-features-input", false)) {
+        removeColumnIds(nextVisible, READ_COLUMN_IDS);
     }
 
     if (settings.readLabels && checkboxChecked("mode-visual-comparison-input", false)) {
@@ -2207,7 +2237,24 @@ function columnValue(column, item) {
 }
 
 function columnDigits(column, item) {
-    return typeof column.digits === "function" ? column.digits(item) : (column.digits ?? 1);
+    return FINAL_NUMBER_DIGITS;
+}
+
+function csvHeaderLabel(label) {
+    return String(label || "")
+        .replaceAll("cm²", "cm^2")
+        .replaceAll("px²", "px^2")
+        .replaceAll("R²", "R^2");
+}
+
+function csvCellValue(column, item) {
+    const value = columnValue(column, item);
+    const csvValue = column.csvValue ? column.csvValue(value, item) : value;
+    if (columnIsNumeric(column)) {
+        const number = numericValue(csvValue);
+        if (number !== null) return number.toFixed(FINAL_NUMBER_DIGITS);
+    }
+    return csvValue === null || csvValue === undefined ? "" : csvValue;
 }
 
 function columnHelpText(column) {
@@ -2481,8 +2528,58 @@ function requestHistogramRebuild(container, options = {}) {
     }, delay);
 }
 
+function isSingleImageOutputMode(batch = activeBatch) {
+    if (batch?.files && batch.files.length === 1) return true;
+    return !batch && globalBatchResults.length === 1;
+}
+
+function setAnalysisOutputContainers(singleMode) {
+    const table = document.getElementById("bulk-table");
+    const tableWrap = table?.closest(".table-wrap");
+    const singleResult = document.getElementById("single-result");
+    if (table) table.style.display = singleMode ? "none" : "table";
+    if (tableWrap) tableWrap.style.display = singleMode ? "none" : "";
+    if (singleResult) {
+        singleResult.style.display = singleMode ? "grid" : "none";
+        if (!singleMode) singleResult.innerHTML = "";
+    }
+}
+
+function renderSingleBatchOutput() {
+    const resultDiv = document.getElementById("single-result");
+    if (!resultDiv) return;
+    const item = globalBatchResults[0];
+    if (!item) {
+        resultDiv.innerHTML = "";
+        return;
+    }
+    const data = item.data || {};
+    const previewIds = selectedPreviewIds();
+    if (item.success && data.success !== false) {
+        resultDiv.innerHTML = renderSingleAnalysis(data, previewIds);
+        return;
+    }
+    const log = processingLogText(item);
+    const notesHtml = log
+        ? `<div class="result-card"><h3>Processing Log</h3><p class="processing-log-cell">${escapeHtml(log)}</p></div>`
+        : "";
+    resultDiv.innerHTML = `${notesHtml}${renderSinglePreviewCards(data, previewIds)}`;
+}
+
 function refreshBatchOutputs(chartsContainer, options = {}) {
     const anchor = captureBatchScrollAnchor();
+    const singleMode = isSingleImageOutputMode();
+    setAnalysisOutputContainers(singleMode);
+    if (singleMode) {
+        renderSingleBatchOutput();
+        requestHistogramRebuild(chartsContainer || document.getElementById("histograms-container"), {
+            debounce: Boolean(options.debounceHistograms),
+            scrollAnchor: anchor
+        });
+        restoreBatchScrollAnchor(anchor);
+        updateBatchJumpControls();
+        return;
+    }
     renderBulkTable();
     document.querySelectorAll("#bulk-table img.preview-img").forEach(img => {
         if (!img.complete) {
@@ -2820,6 +2917,7 @@ let activeSingleRun = null;
 let batchRunCounter = 0;
 let persistentJobPollId = null;
 let savedJobDropdownInteracted = false;
+let visibleHistogramColumnIds = new Set();
 const BATCH_PAUSE_MS = 50;
 const BATCH_WARMUP_COUNT = 2;
 const VIRTUAL_TABLE_THRESHOLD = 80;
@@ -2951,6 +3049,7 @@ function persistentRowItem(row) {
 
 function applyPersistentJob(job, { restored = false } = {}) {
     if (!job) return;
+    if (restored) visibleHistogramColumnIds = new Set();
     const rows = job.rows || [];
     const priorByRow = new Map(globalBatchResults.map(item => [item.data?.row_id, item]));
     const batch = activeBatch?.persistentJobId === job.job_id
@@ -3007,11 +3106,10 @@ function applyPersistentJob(job, { restored = false } = {}) {
         return item;
     });
 
-    const table = document.getElementById("bulk-table");
     const timer = document.getElementById("batch-timer");
     const status = document.getElementById("bulk-status");
     const charts = document.getElementById("histograms-container");
-    if (table) table.style.display = "table";
+    setAnalysisOutputContainers(isSingleImageOutputMode(batch));
     document.getElementById("bulk-section")?.classList.add("bulk-card");
     if (timer) {
         if (batch.running) {
@@ -3222,6 +3320,7 @@ function applySavedAnalysisSetup(job) {
 
     setCheckboxValue("read-labels-input", settings.readLabels);
     setCheckboxValue("read-qr-input", settings.readQr);
+    setCheckboxValue("qr-replaces-text-input", settings.qrReplacesText);
     setCheckboxValue("use-color-checker-input", settings.useColorChecker !== false);
     setFieldValue("line-options-input", settings.lineOptions || "");
     setFieldValue("scale-value-input", settings.scaleValue || "");
@@ -3243,6 +3342,7 @@ function applySavedAnalysisSetup(job) {
         updateColumnPickerChecks();
         setCheckboxValue("read-labels-input", settings.readLabels);
         setCheckboxValue("read-qr-input", settings.readQr);
+        setCheckboxValue("qr-replaces-text-input", settings.qrReplacesText);
         setCheckboxValue("use-color-checker-input", settings.useColorChecker !== false);
         updateDependentSettingsAvailability();
         refreshWizardForSettings();
@@ -3269,6 +3369,7 @@ function clearLoadedBatchView() {
     }
     activeBatch = null;
     globalBatchResults = [];
+    visibleHistogramColumnIds = new Set();
 
     const table = document.getElementById("bulk-table");
     if (table) {
@@ -3276,6 +3377,13 @@ function clearLoadedBatchView() {
         table.querySelector("thead").innerHTML = "";
         table.querySelector("tbody").innerHTML = "";
         table.querySelector("tfoot").innerHTML = "";
+    }
+    const tableWrap = table?.closest(".table-wrap");
+    if (tableWrap) tableWrap.style.display = "";
+    const singleResult = document.getElementById("single-result");
+    if (singleResult) {
+        singleResult.style.display = "none";
+        singleResult.innerHTML = "";
     }
 
     const status = document.getElementById("bulk-status");
@@ -4042,12 +4150,6 @@ function renderTableHeader() {
                 </span>
             </th>
             <th>Filename</th>
-            <th class="processing-log-cell">
-                <span class="column-title-wrap">
-                    <span>Processing Log</span>
-                    <span class="column-help-icon" title="Warnings and errors produced while processing this image. If no warnings or errors were reported, this shows N/A.">?</span>
-                </span>
-            </th>
             ${visibleColumns().map(column => `
                 <th class="draggable-column-header ${column.adjustable ? "adjustable-preview-header" : ""}" draggable="true" data-column-id="${column.id}">
                     <span class="column-title-wrap">
@@ -4056,6 +4158,12 @@ function renderTableHeader() {
                     </span>
                 </th>
             `).join("")}
+            <th class="processing-log-cell">
+                <span class="column-title-wrap">
+                    <span>Processing Log</span>
+                    <span class="column-help-icon" title="Warnings and errors produced while processing this image. If no warnings or errors were reported, this shows N/A.">?</span>
+                </span>
+            </th>
         </tr>
     `;
 }
@@ -4077,7 +4185,7 @@ function renderCell(column, item) {
     if (column.display) {
         return escapeHtml(column.display(value, item));
     }
-    if (isNumber(value)) {
+    if (columnIsNumeric(column) && numericValue(value) !== null) {
         return escapeHtml(fmt(value, columnDigits(column, item)));
     }
     if (value === null || value === undefined || value === "") {
@@ -4091,13 +4199,24 @@ function histogramPreviewValues(column) {
     globalBatchResults.forEach(item => {
         if (!item.included || (!item.success && !item.includeFailedMetrics)) return;
         const value = columnValue(column, item);
-        if (isNumber(value)) values.push(value);
+        const number = numericValue(value);
+        if (number !== null) values.push(number);
     });
     return values;
 }
 
 function includedHistogramRowCount() {
     return globalBatchResults.filter(item => item.included && (item.success || item.includeFailedMetrics)).length;
+}
+
+function columnIsNumeric(column) {
+    if (!column) return false;
+    return column.histogram !== false || ["processing_ms", "line_confidence", "line_orientation", "color_calibration_confidence"].includes(column.id);
+}
+
+function visibleHistogramColumns() {
+    if (includedHistogramRowCount() < 2) return [];
+    return visibleColumns().filter(column => column.histogram !== false && visibleHistogramColumnIds.has(column.id));
 }
 
 function miniHistogramSvg(column) {
@@ -4169,9 +4288,21 @@ function renderHistogramPreviewFooter(columns) {
     tfoot.innerHTML = `
         <tr class="histogram-preview-row">
             <td></td>
-            <td class="histogram-preview-label">Distribution previews, see proper histograms below.</td>
+            <td class="histogram-preview-label">Click a distribution preview to show or hide its histogram below.</td>
+            ${columns.map(column => {
+                const clickable = column.histogram !== false;
+                const active = visibleHistogramColumnIds.has(column.id);
+                const classes = [
+                    column.adjustable ? "adjustable-preview-cell" : "",
+                    clickable ? "histogram-preview-toggle" : "",
+                    active ? "histogram-preview-active" : ""
+                ].filter(Boolean).join(" ");
+                const attrs = clickable
+                    ? `data-hist-column-id="${escapeHtml(column.id)}" title="Show or hide ${escapeHtml(column.histLabel || column.label)} histogram"`
+                    : "";
+                return `<td class="${classes}" ${attrs}>${miniHistogramSvg(column)}</td>`;
+            }).join("")}
             <td></td>
-            ${columns.map(column => `<td class="${column.adjustable ? "adjustable-preview-cell" : ""}">${miniHistogramSvg(column)}</td>`).join("")}
         </tr>
     `;
 }
@@ -4230,8 +4361,8 @@ function renderBulkRow(item, idx, columns) {
             <td>${escapeHtml(item.data?.filename || item.file_name)}
                 ${warningBadge(item.notes)}
             </td>
-            ${renderProcessingLogCell(item)}
             ${columnCells}
+            ${renderProcessingLogCell(item)}
         `;
     } else if (item.retrying) {
         tr.classList.add("retry-row");
@@ -4239,8 +4370,8 @@ function renderBulkRow(item, idx, columns) {
         tr.innerHTML = `
             <td><input type="checkbox" ${item.included ? "checked" : ""} class="toggle-checkbox" data-idx="${idx}"></td>
             <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
-            ${renderProcessingLogCell(item)}
             ${columnCells}
+            ${renderProcessingLogCell(item)}
         `;
     } else {
         tr.classList.add("error-row");
@@ -4250,8 +4381,8 @@ function renderBulkRow(item, idx, columns) {
         tr.innerHTML = `
             <td>${includeCell}</td>
             <td>${escapeHtml(item.file_name)}${warningBadge(item.notes)}</td>
-            ${renderProcessingLogCell(item)}
             ${columnCells}
+            ${renderProcessingLogCell(item)}
         `;
     }
     return tr;
@@ -4544,12 +4675,11 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
         return;
     }
 
-    const table = document.getElementById("bulk-table");
     const chartsContainer = document.getElementById("histograms-container");
     const timerDiv = document.getElementById("batch-timer");
     const batchSettings = getAnalysisSettingsSnapshot();
     chartsContainer.innerHTML = "";
-    table.style.display = "table";
+    visibleHistogramColumnIds = new Set();
     document.getElementById("bulk-section").classList.add("bulk-card");
     if (timerDiv) {
         timerDiv.style.display = "block";
@@ -4558,10 +4688,11 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     setProgressBar("bulk-progress", 0, { visible: true });
 
     globalBatchResults = [];
-    renderBulkTable();
-    updateBatchJumpControls();
     status.innerText = "Warming up production server...";
     activeBatch = makeBatchState(Array.from(files), batchSettings, shouldRequestLineOcr(selectedPreviewIds(), batchSettings));
+    setAnalysisOutputContainers(isSingleImageOutputMode(activeBatch));
+    if (!isSingleImageOutputMode(activeBatch)) renderBulkTable();
+    updateBatchJumpControls();
     activeBatch.running = true;
     activeBatch.uploading = true;
     activeBatch.uploadProgress = 0;
@@ -4668,6 +4799,20 @@ document.querySelector("#bulk-table tbody").addEventListener("change", (e) => {
     }
 });
 
+document.querySelector("#bulk-table tfoot").addEventListener("click", (event) => {
+    const cell = event.target.closest("[data-hist-column-id]");
+    if (!cell) return;
+    const columnId = cell.dataset.histColumnId;
+    if (!columnId) return;
+    if (visibleHistogramColumnIds.has(columnId)) {
+        visibleHistogramColumnIds.delete(columnId);
+    } else {
+        visibleHistogramColumnIds.add(columnId);
+    }
+    renderHistogramPreviewFooter(visibleColumns());
+    requestHistogramRebuild(document.getElementById("histograms-container"));
+});
+
 // --- DYNAMIC HISTOGRAM BUILDER ---
 function destroyHistogramCharts() {
     histogramCharts.forEach(chart => {
@@ -4683,7 +4828,10 @@ function rebuildHistograms(container) {
     if (globalBatchResults.length === 0) return;
     if (includedHistogramRowCount() < 2) return;
 
-    const histogramColumns = visibleColumns().filter(column => column.histogram !== false);
+    const visibleIds = new Set(visibleColumns().map(column => column.id));
+    visibleHistogramColumnIds = new Set([...visibleHistogramColumnIds].filter(id => visibleIds.has(id)));
+    const histogramColumns = visibleHistogramColumns();
+    if (histogramColumns.length === 0) return;
     const batchData = Object.fromEntries(histogramColumns.map(column => [column.histLabel || column.label, []]));
 
     // Only pull data from rows that are checked (included: true)
@@ -4691,9 +4839,10 @@ function rebuildHistograms(container) {
         if (!item.included || (!item.success && !item.includeFailedMetrics)) return;
         histogramColumns.forEach(column => {
             const value = columnValue(column, item);
-            if (isNumber(value)) {
+            const number = numericValue(value);
+            if (number !== null) {
                 const key = column.histLabel || column.label;
-                batchData[key].push(value);
+                batchData[key].push(number);
             }
         });
     });
@@ -4841,17 +4990,16 @@ document.getElementById("download-csv-btn").addEventListener("click", () => {
     if (activeBatch?.running || activeBatch?.onDemandRunning) return;
     applyMetricColumnUnitLabels();
     const columns = visibleColumns().filter(column => column.csv !== false);
-    const header = ["Filename", "Processing Log", ...columns.map(column => column.csvLabel || column.label)];
+    const header = ["Filename", ...columns.map(column => csvHeaderLabel(column.csvLabel || column.label)), "Processing Log"];
     const rows = [header.map(csvEscape).join(",")];
 
     globalBatchResults.forEach(item => {
         if (!item.included || (!item.success && !item.includeFailedMetrics)) return;
-        const values = [item.data.filename || item.file_name, processingLogText(item) || "N/A"];
+        const values = [item.data.filename || item.file_name];
         columns.forEach(column => {
-            const value = columnValue(column, item);
-            const csvValue = column.csvValue ? column.csvValue(value, item) : value;
-            values.push(isNumber(csvValue) ? csvValue : (csvValue || ""));
+            values.push(csvCellValue(column, item));
         });
+        values.push(processingLogText(item) || "N/A");
         rows.push(values.map(csvEscape).join(","));
     });
 
