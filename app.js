@@ -487,6 +487,65 @@ function loadSavedSession() {
     }
 }
 
+function clearSavedSession() {
+    try {
+        sessionStorage.removeItem("fp_session");
+    } catch (_) { /* private browsing or quota */ }
+}
+
+function signOut() {
+    clearSavedSession();
+
+    if (queuePollingIntervalId) {
+        clearInterval(queuePollingIntervalId);
+        queuePollingIntervalId = null;
+    }
+    if (productionWarmupIntervalId) {
+        clearInterval(productionWarmupIntervalId);
+        productionWarmupIntervalId = null;
+    }
+    if (persistentJobPollId) {
+        clearInterval(persistentJobPollId);
+        persistentJobPollId = null;
+    }
+
+    if (activeSingleRun?.running) {
+        activeSingleRun.stopRequested = true;
+        activeSingleRun.abortController?.abort();
+    }
+    if (activeBatch?.running || activeBatch?.onDemandRunning) {
+        activeBatch.stopRequested = true;
+        activeBatch.onDemandStopRequested = true;
+        activeBatch.abortController?.abort();
+        activeBatch.onDemandAbortController?.abort();
+        stopBatchLiveTimer(activeBatch);
+    }
+
+    currentPassword = "";
+    currentUsername = "";
+    currentSessionId = "";
+    productionWarmupPromise = null;
+    productionWarmupPromiseKey = "";
+    latestSingleData = null;
+    latestSinglePreviewIds = [];
+    activeSingleRun = null;
+    clearLoadedBatchView();
+    closeLightbox();
+
+    document.getElementById("app-view").style.display = "none";
+    document.getElementById("login-view").style.display = "block";
+    const nameInput = document.getElementById("login-name");
+    const passwordInput = document.getElementById("login-password");
+    const errorDiv = document.getElementById("login-error");
+    if (nameInput) nameInput.value = "";
+    if (passwordInput) passwordInput.value = "";
+    if (errorDiv) errorDiv.innerText = "";
+    setStoredDataStatus("");
+    const serverStatus = document.getElementById("server-status");
+    if (serverStatus) serverStatus.innerHTML = "Connecting to server...";
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+}
+
 async function enterApp() {
     document.getElementById("login-view").style.display = "none";
     document.getElementById("app-view").style.display = "block";
@@ -558,6 +617,8 @@ document.getElementById("toggle-password-btn")?.addEventListener("click", functi
     this.textContent = showing ? "Show" : "Hide";
     this.setAttribute("aria-label", showing ? "Show password" : "Hide password");
 });
+
+document.getElementById("sign-out-btn")?.addEventListener("click", signOut);
 
 function hasLineOptionList(settings) {
     return Boolean(settings?.lineOptions && settings.lineOptions.trim());
@@ -1882,9 +1943,9 @@ function syncAnalysisModeCheckboxesFromColumns() {
     setCheckboxVisualState("mode-smoothing-input", columnSelectionState(columnIdsForGroup("experimental_smoothed")));
     setCheckboxVisualState("mode-legacy-ta-input", columnSelectionState(columnIdsForGroup("traditional")));
     setCheckboxVisualState("mode-visual-comparison-input", columnSelectionState(columnIdsForGroup("previews_standard")));
-    setBinaryCheckboxVisualState("read-labels-input", columnSelectionState([...OCR_STAGE_COLUMN_IDS]).any);
-    setBinaryCheckboxVisualState("read-qr-input", columnSelectionState([...QR_STAGE_COLUMN_IDS]).any);
-    setBinaryCheckboxVisualState("use-color-checker-input", columnSelectionState([...COLOR_STAGE_COLUMN_IDS, "image_pre_calibration_base64"]).any);
+    setBinaryCheckboxVisualState("read-labels-input", columnSelectionState(OCR_COLUMN_IDS).any);
+    setBinaryCheckboxVisualState("read-qr-input", columnSelectionState(QR_COLUMN_IDS).any);
+    setBinaryCheckboxVisualState("use-color-checker-input", columnSelectionState([...COLOR_STAGE_COLUMN_IDS]).any);
     setAllFeaturesVisualState();
 }
 

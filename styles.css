@@ -36,6 +36,30 @@ h1 {
   flex: 0 0 auto;
 }
 
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.sign-out-btn {
+  background: #eef2f5;
+  color: #35434d;
+  border: 1px solid #c5ced6;
+  border-radius: 7px;
+  padding: 8px 12px;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.sign-out-btn:hover {
+  background: #e1e7ec;
+  color: #1e2a32;
+}
+
 .app-tabs {
   display: flex;
   gap: 8px;
@@ -203,6 +227,10 @@ button:hover {
   .app-logo {
     height: 48px;
     max-width: 38vw;
+  }
+
+  .app-header-actions {
+    gap: 10px;
   }
 
   .tab-button {
