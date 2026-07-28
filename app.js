@@ -4944,6 +4944,16 @@ function drawHistograms(histogramSeries, container) {
             labels.push(`>${overflowThreshold}`);
             counts.push(overflowValues.length);
         }
+        const barColors = counts.map((_, idx) => (
+            overflowValues.length > 0 && idx === counts.length - 1
+                ? "rgba(223, 123, 57, 0.72)"
+                : "rgba(54, 162, 235, 0.6)"
+        ));
+        const borderColors = counts.map((_, idx) => (
+            overflowValues.length > 0 && idx === counts.length - 1
+                ? "rgba(223, 123, 57, 1)"
+                : "rgba(54, 162, 235, 1)"
+        ));
 
         const wrapper = document.createElement("div");
         wrapper.className = "chart-box";
@@ -4967,7 +4977,7 @@ function drawHistograms(histogramSeries, container) {
             type: "bar",
             data: {
                 labels: labels,
-                datasets: [{ label: title, data: counts, backgroundColor: "rgba(54, 162, 235, 0.6)", borderColor: "rgba(54, 162, 235, 1)", borderWidth: 1 }]
+                datasets: [{ label: title, data: counts, backgroundColor: barColors, borderColor: borderColors, borderWidth: 1 }]
             },
             options: chartOptions
         });
