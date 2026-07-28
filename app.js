@@ -3180,6 +3180,9 @@ function applySavedAnalysisSetup(job) {
         visibleColumnIds = new Set(requested);
         ALWAYS_DEFAULT_COLUMN_IDS.forEach(id => visibleColumnIds.add(id));
         updateColumnPickerChecks();
+        setCheckboxValue("read-labels-input", settings.readLabels);
+        setCheckboxValue("read-qr-input", settings.readQr);
+        setCheckboxValue("use-color-checker-input", settings.useColorChecker !== false);
         updateDependentSettingsAvailability();
         refreshWizardForSettings();
     } else {
@@ -4032,6 +4035,10 @@ function histogramPreviewValues(column) {
     return values;
 }
 
+function includedHistogramRowCount() {
+    return globalBatchResults.filter(item => item.included && (item.success || item.includeFailedMetrics)).length;
+}
+
 function miniHistogramSvg(column) {
     if (column.histogram === false) return `<span class="muted">-</span>`;
 
@@ -4093,6 +4100,10 @@ function renderHistogramPreviewFooter(columns) {
     const table = document.getElementById("bulk-table");
     const tfoot = table.querySelector("tfoot");
     if (!tfoot) return;
+    if (includedHistogramRowCount() < 2) {
+        tfoot.innerHTML = "";
+        return;
+    }
 
     tfoot.innerHTML = `
         <tr class="histogram-preview-row">
@@ -4609,6 +4620,7 @@ function rebuildHistograms(container) {
     destroyHistogramCharts();
     container.innerHTML = ""; // Clear old charts
     if (globalBatchResults.length === 0) return;
+    if (includedHistogramRowCount() < 2) return;
 
     const histogramColumns = visibleColumns().filter(column => column.histogram !== false);
     const batchData = Object.fromEntries(histogramColumns.map(column => [column.histLabel || column.label, []]));
