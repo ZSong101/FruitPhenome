@@ -45,6 +45,10 @@ h1 {
 }
 
 .sign-out-btn {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 2;
   background: #eef2f5;
   color: #35434d;
   border: 1px solid #c5ced6;
