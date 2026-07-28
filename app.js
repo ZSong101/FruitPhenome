@@ -3226,6 +3226,25 @@ async function createPersistentBatchJob(files, settings) {
     startPersistentJobPolling(job.job_id);
 }
 
+async function createPersistentReprocessJob(sourceJobId, settings) {
+    const response = await fetch(processJobsUrl(`/${encodeURIComponent(sourceJobId)}/reprocess`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            password: currentPassword,
+            username: currentUsername,
+            settings,
+            requested_columns: selectedColumnIdsForRequest(),
+            preview_types: selectedPreviewIds()
+        })
+    });
+    const data = await response.json();
+    if (!response.ok || data.success === false) throw new Error(data.message || `HTTP ${response.status}`);
+    applyPersistentJob(data.job);
+    await refreshSavedJobSelector(data.job.job_id);
+    startPersistentJobPolling(data.job.job_id);
+}
+
 async function createPersistentSingleJob(file, settings, previewIds, signal = null) {
     const singleSettings = { ...(settings || {}), job_kind: "single" };
     const form = new FormData();
@@ -3289,6 +3308,33 @@ async function waitForSinglePersistentJob(jobId, run, statusEl) {
 function setSavedJobDropdownAttention(active) {
     const row = document.getElementById("saved-job-select")?.closest(".saved-job-row");
     if (row) row.classList.toggle("saved-job-attention", Boolean(active));
+}
+
+function selectedSavedJobId() {
+    return document.getElementById("saved-job-select")?.value || "";
+}
+
+function updateBatchUploadModeControls() {
+    const savedJobId = selectedSavedJobId();
+    const fileInput = document.getElementById("bulk-files");
+    const uploadNote = document.getElementById("bulk-upload-note");
+    const processBtn = document.getElementById("process-batch-btn");
+    const reprocessMode = Boolean(savedJobId);
+    if (fileInput) {
+        fileInput.disabled = reprocessMode;
+        fileInput.title = reprocessMode
+            ? 'Select "New blank batch" in the dropdown to process a new batch.'
+            : "";
+        if (reprocessMode) fileInput.value = "";
+    }
+    if (uploadNote) {
+        uploadNote.innerText = reprocessMode
+            ? 'Select "New blank batch" in the dropdown to process a new batch. The selected saved job can be re-processed without uploading the images again.'
+            : "Upload one or more images. Supported file types: JPG, JPEG, and PNG.";
+    }
+    if (processBtn) {
+        processBtn.innerText = reprocessMode ? "Re-Process Batch" : "Process Images";
+    }
 }
 
 function setCheckboxValue(id, checked) {
@@ -3402,6 +3448,7 @@ function clearLoadedBatchView() {
     });
     const processBtn = document.getElementById("process-batch-btn");
     if (processBtn) processBtn.disabled = false;
+    updateBatchUploadModeControls();
     setProgressBar("bulk-progress", 0, { visible: false });
     updateAnalysisSettingsLock();
     updateBatchJumpControls();
@@ -3438,6 +3485,7 @@ async function refreshSavedJobSelector(selectedJobId = "") {
             const target = selectedJobId || "";
             select.value = target && [...select.options].some(option => option.value === target) ? target : "";
             setSavedJobDropdownAttention(jobs.length > 0 && !target && !savedJobDropdownInteracted);
+            updateBatchUploadModeControls();
         }
         return jobs;
     } catch (err) {
@@ -3447,6 +3495,7 @@ async function refreshSavedJobSelector(selectedJobId = "") {
         throw err;
     } finally {
         if (select) select.disabled = false;
+        updateBatchUploadModeControls();
     }
 }
 
@@ -3615,6 +3664,7 @@ function updateBatchControls(batch) {
 
     const ownsUi = isActiveBatch(batch);
     const busy = Boolean(batch.running || batch.onDemandRunning);
+    updateBatchUploadModeControls();
     if (processBtn) processBtn.disabled = ownsUi && busy;
     stopBtn.style.display = ownsUi && busy ? "inline-flex" : "none";
     if (!(ownsUi && busy)) resetStopConfirmation(stopBtn);
@@ -4665,8 +4715,10 @@ async function runBatch(batch) {
 
 document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const selectedJobId = selectedSavedJobId();
+    const isReprocess = Boolean(selectedJobId);
     const files = document.getElementById("bulk-files").files;
-    if (!files || files.length === 0) return;
+    if (!isReprocess && (!files || files.length === 0)) return;
     const status = document.getElementById("bulk-status");
     if (!requireWalkthroughComplete(status)) return;
 
@@ -4678,6 +4730,28 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     const chartsContainer = document.getElementById("histograms-container");
     const timerDiv = document.getElementById("batch-timer");
     const batchSettings = getAnalysisSettingsSnapshot();
+    let reprocessSourceJob = null;
+    if (isReprocess) {
+        try {
+            reprocessSourceJob = activeBatch?.persistentJobId === selectedJobId
+                ? null
+                : await fetchPersistentJob(selectedJobId);
+        } catch (err) {
+            status.innerText = `Could not prepare saved job for re-processing: ${err.message}`;
+            return;
+        }
+    }
+    const batchFiles = isReprocess
+        ? (
+            activeBatch?.persistentJobId === selectedJobId && activeBatch.files?.length
+                ? activeBatch.files
+                : (reprocessSourceJob?.rows || []).map(row => ({ name: row.filename || "image" }))
+        )
+        : Array.from(files);
+    if (!batchFiles.length) {
+        status.innerText = "The selected saved job does not have any stored images to re-process.";
+        return;
+    }
     chartsContainer.innerHTML = "";
     visibleHistogramColumnIds = new Set();
     document.getElementById("bulk-section").classList.add("bulk-card");
@@ -4688,8 +4762,8 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
     setProgressBar("bulk-progress", 0, { visible: true });
 
     globalBatchResults = [];
-    status.innerText = "Warming up production server...";
-    activeBatch = makeBatchState(Array.from(files), batchSettings, shouldRequestLineOcr(selectedPreviewIds(), batchSettings));
+    status.innerText = isReprocess ? "Warming up production server before re-processing..." : "Warming up production server...";
+    activeBatch = makeBatchState(batchFiles, batchSettings, shouldRequestLineOcr(selectedPreviewIds(), batchSettings));
     setAnalysisOutputContainers(isSingleImageOutputMode(activeBatch));
     if (!isSingleImageOutputMode(activeBatch)) renderBulkTable();
     updateBatchJumpControls();
@@ -4708,10 +4782,16 @@ document.getElementById("bulk-form").addEventListener("submit", async (e) => {
             statusText: "Warming up production server..."
         });
         if (!activeBatch || activeBatch.stopRequested) return;
-        status.innerText = "Uploading batch to persistent backend storage...";
-        await createPersistentBatchJob(files, batchSettings);
+        status.innerText = isReprocess
+            ? "Queuing saved images for re-processing..."
+            : "Uploading batch to persistent backend storage...";
+        if (isReprocess) {
+            await createPersistentReprocessJob(selectedJobId, batchSettings);
+        } else {
+            await createPersistentBatchJob(files, batchSettings);
+        }
     } catch (err) {
-        status.innerText = `Could not create persistent processing job: ${err.message}`;
+        status.innerText = `${isReprocess ? "Could not re-process saved batch" : "Could not create persistent processing job"}: ${err.message}`;
         if (activeBatch && !activeBatch.persistentJobId) {
             stopBatchLiveTimer(activeBatch);
             activeBatch.running = false;
@@ -4765,6 +4845,7 @@ savedJobSelect?.addEventListener("change", async (event) => {
     savedJobDropdownInteracted = true;
     setSavedJobDropdownAttention(false);
     const jobId = event.target.value;
+    updateBatchUploadModeControls();
     if (!jobId) {
         clearLoadedBatchView();
         return;
