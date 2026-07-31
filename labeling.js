@@ -240,6 +240,7 @@
 
     function setClassLayers(nextLayers, options = {}) {
         const preserveMasks = options.preserveMasks !== false;
+        const renderAfterUpdate = options.render !== false;
         const normalized = normalizeClassLayers(nextLayers);
         const nextIds = normalized.map((layer) => layer.id);
         classLayers = normalized;
@@ -262,7 +263,7 @@
         if (!nextIds.includes(activeLayer)) activeLayer = nextIds[0] || "whole";
         renderLayerButtons();
         updateButtons();
-        composite();
+        if (renderAfterUpdate) composite();
     }
 
     function setStatus(message, isError) {
@@ -1505,6 +1506,7 @@
             d.canvas.height = 0;
             d.canvas.style.display = "none";
         }
+        displayCtx = null;
         if (d.canvasEmpty) d.canvasEmpty.style.display = "block";
         resetViewport();
         renderQa(null);
@@ -1544,7 +1546,7 @@
 
             const maskData = await apiGetJson(`/${currentDatasetId}/images/${imageId}/masks`);
             if (maskData?.class_layers) {
-                setClassLayers(maskData.class_layers, { preserveMasks: false });
+                setClassLayers(maskData.class_layers, { preserveMasks: false, render: false });
             }
             LAYERS.forEach((layer) => { layerCanvas[layer] = newLayerCanvas(); });
             undoStack = [];
@@ -1642,6 +1644,7 @@
         displayCtx.clearRect(0, 0, w, h);
         displayCtx.drawImage(baseImage, 0, 0, w, h);
         LAYERS.forEach((layer) => {
+            if (!layerCanvas[layer]) return;
             displayCtx.globalAlpha = layerOpacity[layer];
             displayCtx.drawImage(layerCanvas[layer], 0, 0, w, h);
         });
