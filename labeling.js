@@ -26,6 +26,7 @@
     const DOUBLE_CLICK_MS = 260;
     const STROKE_DRAG_THRESHOLD_PX = 3;
     const TRAIN_TERMINAL_STATUSES = new Set(["promoted", "rejected", "failed"]);
+    const LAST_DATASET_STORAGE_PREFIX = "fruitphenome:lastLabelingDataset";
 
     // --- State ---
     let currentDatasetId = null;
@@ -294,6 +295,29 @@
 
     function selectedStudioFruit() {
         return (typeof selectedFruit === "function" && selectedFruit()) || "";
+    }
+
+    function lastDatasetStorageKey() {
+        const username = (typeof currentUsername !== "undefined" && currentUsername) ? currentUsername : "anonymous";
+        const fruit = selectedStudioFruit() || "fruit";
+        return `${LAST_DATASET_STORAGE_PREFIX}:${username}:${fruit}`;
+    }
+
+    function readLastDatasetId() {
+        try {
+            return window.localStorage?.getItem(lastDatasetStorageKey()) || "";
+        } catch (_err) {
+            return "";
+        }
+    }
+
+    function rememberLastDatasetId(datasetId) {
+        if (!datasetId || datasetId === "__new__") return;
+        try {
+            window.localStorage?.setItem(lastDatasetStorageKey(), datasetId);
+        } catch (_err) {
+            // Non-critical: private browsing or storage policies should not block labeling.
+        }
     }
 
     async function apiGetJson(path) {
@@ -860,7 +884,9 @@
             options.push(`<option value="__new__">+ Create new dataset...</option>`);
             d.datasetSelect.innerHTML = options.join("");
             datasetsLoaded = true;
-            const target = selectId || currentDatasetId || (datasetSummaries[0] && datasetSummaries[0].dataset_id);
+            const validIds = new Set(datasetSummaries.map((ds) => ds.dataset_id));
+            const target = [selectId, currentDatasetId, readLastDatasetId(), datasetSummaries[0]?.dataset_id]
+                .find((id) => id && validIds.has(id));
             if (target) {
                 d.datasetSelect.value = target;
                 await selectDataset(target);
@@ -884,6 +910,7 @@
 
     async function selectDataset(datasetId) {
         currentDatasetId = datasetId || null;
+        if (currentDatasetId) rememberLastDatasetId(currentDatasetId);
         currentImageId = null;
         clearCanvas();
         const summary = currentDatasetSummary();
@@ -1609,11 +1636,24 @@
         d.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
         d.canvas.classList.toggle("pan-active", panMode);
         d.canvas.classList.toggle("panning", panning);
+        d.canvasHost?.classList.toggle("pan-active", Boolean(baseImage && zoomLevel > 1));
+        d.canvasHost?.classList.toggle("panning", panning);
         if (d.zoomValue) d.zoomValue.innerText = `${Math.round(zoomLevel * 100)}%`;
     }
 
-    function setZoom(nextZoom) {
-        zoomLevel = Math.max(1, Math.min(8, Number(nextZoom) || 1));
+    function setZoom(nextZoom, anchorEvent = null) {
+        const d = dom();
+        const oldZoom = zoomLevel;
+        const newZoom = Math.max(1, Math.min(8, Number(nextZoom) || 1));
+        if (anchorEvent && d.canvas && baseImage && oldZoom > 0 && newZoom !== oldZoom) {
+            const rect = d.canvas.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const scaleRatio = newZoom / oldZoom;
+            panX += (1 - scaleRatio) * (anchorEvent.clientX - centerX);
+            panY += (1 - scaleRatio) * (anchorEvent.clientY - centerY);
+        }
+        zoomLevel = newZoom;
         if (zoomLevel === 1) {
             panX = 0;
             panY = 0;
@@ -2284,8 +2324,28 @@
         d.canvasHost?.addEventListener("wheel", (e) => {
             if (!baseImage) return;
             e.preventDefault();
-            setZoom(zoomLevel * (e.deltaY < 0 ? 1.08 : 0.93));
+            setZoom(zoomLevel * (e.deltaY < 0 ? 1.08 : 0.93), e);
         }, { passive: false });
+        d.canvasHost?.addEventListener("pointerdown", (e) => {
+            if (e.target === d.canvas || !baseImage || zoomLevel <= 1) return;
+            e.preventDefault();
+            d.canvasHost.setPointerCapture?.(e.pointerId);
+            flushPendingTapStroke();
+            beginPan(e);
+        });
+        d.canvasHost?.addEventListener("pointermove", (e) => {
+            if (e.target === d.canvas) return;
+            if (!panning || !panStart) return;
+            moveStroke(e);
+        });
+        d.canvasHost?.addEventListener("pointerup", (e) => {
+            d.canvasHost.releasePointerCapture?.(e.pointerId);
+            endPan();
+        });
+        d.canvasHost?.addEventListener("pointercancel", (e) => {
+            d.canvasHost.releasePointerCapture?.(e.pointerId);
+            endPan();
+        });
         d.zoomInBtn?.addEventListener("click", () => setZoom(zoomLevel * 1.2));
         d.zoomOutBtn?.addEventListener("click", () => setZoom(zoomLevel / 1.2));
         d.zoomResetBtn?.addEventListener("click", resetViewport);

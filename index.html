@@ -338,6 +338,8 @@
     .studio-zoom-controls button { width: 38px; padding: 0; font-size: 18px; }
     #studio-zoom-value { min-width: 48px; text-align: center; color: #50616d; font-size: 12px; font-weight: 800; }
     .studio-canvas-host { position: relative; border: 1px solid #d8e1e8; border-radius: 8px; background: #2b3640; height: min(68vh, 760px); min-height: 380px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .studio-canvas-host.pan-active { cursor: grab; }
+    .studio-canvas-host.panning { cursor: grabbing; }
     #studio-canvas { max-width: 100%; touch-action: none; cursor: crosshair; display: block; transform-origin: center center; will-change: transform; }
     #studio-canvas.pan-active { cursor: grab; }
     #studio-canvas.panning { cursor: grabbing; }
